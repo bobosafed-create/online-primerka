@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Онлайн примерка</title>
+<style>
+  :root{
+    --accent:#e5395b; --accent-dark:#c72a49;
+    --green:#39b36a; --amber:#f0a92e;
+    --ink:#1d1d22; --muted:#6c6c76; --bg:#f5f3f1; --card:#fff; --line:#eceae6;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; font-family:'Helvetica Neue',Arial,sans-serif; background:var(--bg); color:var(--ink);}
+  .wrap{max-width:620px; margin:0 auto; padding:18px 16px 60px;}
+  header{text-align:center; margin-bottom:14px;}
+  h1{font-family:Georgia,serif; font-size:26px; margin:6px 0 4px;}
+  header p{color:var(--muted); font-size:14px; margin:0;}
+
+  .card{background:var(--card); border:1px solid var(--line); border-radius:16px;
+        padding:18px; margin-bottom:16px; box-shadow:0 2px 10px rgba(0,0,0,.03);}
+  .card.dim{opacity:.5; pointer-events:none;}
+  h2{font-size:17px; margin:0 0 4px; display:flex; align-items:center; gap:9px;}
+  .step-num{width:26px; height:26px; border-radius:50%; background:var(--accent); color:#fff;
+            display:inline-flex; align-items:center; justify-content:center; font-size:14px; font-weight:700;}
+  .sub{color:var(--muted); font-size:13.5px; margin:2px 0 14px;}
+
+  .addrow{display:flex; gap:10px; flex-wrap:wrap;}
+  .addbtn{flex:1; min-width:120px; border:none; border-radius:12px; padding:14px 10px;
+          font-size:15px; font-weight:700; color:#fff; cursor:pointer;}
+  .addbtn.top{background:var(--green);}
+  .addbtn.bottom{background:var(--amber);}
+  .addbtn.extra{background:#8a8f98;}
+  .addbtn:active{transform:scale(.98);}
+
+  .thumbs{display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;}
+  .thumb{position:relative; width:80px; height:100px; border-radius:10px; overflow:hidden;
+         border:2px solid var(--line); background:#f0ece7;}
+  .thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+  .thumb .lbl{position:absolute; left:0; bottom:0; right:0; font-size:10px; text-align:center;
+              color:#fff; padding:2px; font-weight:700;}
+  .thumb .lbl.top{background:rgba(57,179,106,.92);}
+  .thumb .lbl.bottom{background:rgba(240,169,46,.92);}
+  .thumb .lbl.extra{background:rgba(138,143,152,.92);}
+  .thumb .del{position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%;
+              background:rgba(0,0,0,.55); color:#fff; border:none; font-size:13px; cursor:pointer; line-height:1;}
+
+  .count-note{font-size:13px; margin-top:12px;}
+  .count-note.ok{color:var(--green);}
+  .count-note.bad{color:var(--muted);}
+
+  .btn{display:block; width:100%; border:none; border-radius:14px; padding:16px;
+       font-size:17px; font-weight:800; color:#fff; background:var(--accent); cursor:pointer;
+       box-shadow:0 6px 16px rgba(229,57,91,.28);}
+  .btn:disabled{background:#cdc7c0; box-shadow:none; cursor:not-allowed;}
+  .btn:active:not(:disabled){transform:scale(.99);}
+
+  /* Манекены */
+  .manne-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:6px 0 16px;}
+  .manne{border:2px solid var(--line); border-radius:14px; overflow:hidden; cursor:pointer;
+         background:#000; aspect-ratio:3/4; position:relative;}
+  .manne.sel{border-color:var(--accent); box-shadow:0 0 0 3px rgba(229,57,91,.18);}
+  .manne video,.manne img{width:100%; height:100%; object-fit:cover; display:block;}
+  .manne .n{position:absolute; top:6px; left:6px; background:rgba(0,0,0,.5); color:#fff;
+            font-size:11px; padding:2px 7px; border-radius:10px;}
+
+  .progress{text-align:center; padding:22px 6px;}
+  .spinner{width:42px; height:42px; border:4px solid var(--line); border-top-color:var(--accent);
+           border-radius:50%; margin:0 auto 14px; animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+
+  .result video{width:100%; border-radius:14px; background:#000; display:block;}
+  .result .dl{display:inline-block; margin-top:12px; color:var(--accent); font-weight:700; text-decoration:none;}
+  .look-thumbs{display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;}
+  .look-thumbs img{width:56px; height:70px; object-fit:cover; border-radius:8px; border:1px solid var(--line);}
+
+  .foot{text-align:center; font-size:12px; color:#a7a4a4; margin-top:18px;}
+  .foot a{color:#8b8890; text-decoration:none; margin:0 5px;}
+  .err{color:var(--accent-dark); font-size:13.5px; margin-top:10px;}
+  .badge{display:inline-block; background:#fff0d6; color:#a56a00; border-radius:8px;
+         padding:3px 9px; font-size:12px; font-weight:700; margin-left:6px;}
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Онлайн примерка</h1>
+    <p>Загрузите одежду — увидите её на модели в коротком видео.</p>
+  </header>
+
+  <!-- ШАГ 1 -->
+  <div class="card" id="card1">
+    <h2><span class="step-num">1</span> Загрузите одежду</h2>
+    <div class="sub">Нужны минимум верх и низ. Всего верх+низ — до 6 вещей. Дополнительно можно добавить головной убор, обувь, аксессуар.</div>
+    <div class="addrow">
+      <button class="addbtn top" onclick="pick('top')">＋ Верх</button>
+      <button class="addbtn bottom" onclick="pick('bottom')">＋ Низ</button>
+      <button class="addbtn extra" onclick="pick('extra')">＋ Дополнительно</button>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="count-note bad" id="countNote">Добавьте хотя бы один верх и один низ.</div>
+    <input type="file" id="fileInput" accept="image/*">
+  </div>
+
+  <!-- ШАГ 2 -->
+  <div class="card dim" id="card2">
+    <h2><span class="step-num">2</span> Оплата <span id="testBadge" class="badge" style="display:none;">тест</span></h2>
+    <div class="sub">Оплата через ЮKassa. Видео-примерка откроется сразу после оплаты.</div>
+    <button class="btn" id="payBtn" disabled onclick="startPay()">Оплатить и примерить</button>
+    <div class="err" id="payErr"></div>
+  </div>
+
+  <!-- ШАГ 3 -->
+  <div class="card dim" id="card3">
+    <h2><span class="step-num">3</span> Выберите модель и примерьте</h2>
+    <div class="sub">Одежда «наденется» на выбранную модель в видео (~1–2 минуты).</div>
+    <div class="manne-grid" id="manneGrid"></div>
+    <button class="btn" id="tryonBtn" disabled onclick="startTryon()">Примерить</button>
+    <div class="err" id="tryonErr"></div>
+  </div>
+
+  <!-- ШАГ 4 -->
+  <div class="card dim" id="card4">
+    <h2><span class="step-num">4</span> Ваш образ</h2>
+    <div class="progress" id="progress" style="display:none;">
+      <div class="spinner"></div>
+      <div id="progressText">Готовим видео… это займёт минуту-другую.</div>
+    </div>
+    <div class="result" id="result" style="display:none;">
+      <video id="resultVideo" controls autoplay loop muted playsinline></video>
+      <a class="dl" id="dlLink" href="#" download="primerka.mp4">⬇ Скачать видео</a>
+      <div class="look-thumbs" id="lookThumbs"></div>
+    </div>
+  </div>
+
+  <div class="foot">
+    <a href="/oferta" target="_blank">Оферта</a>·
+    <a href="/politika" target="_blank">Конфиденциальность</a>·
+    <a href="/kontakty" target="_blank">Контакты</a>
+  </div>
+</div>
+
+<script>
+/* ---------- Состояние ---------- */
+let CONFIG = {price:'99', currency:'RUB', paymentsEnabled:false, tryonEnabled:false,
+              mannequins:[], minItems:2, maxItems:6};
+let items = [];            // {id, kind:'top'|'bottom'|'extra', dataUrl}
+let idc = 1;
+let curKind = 'top';
+let selectedMannequin = null;
+let currentOrderId = null;
+
+const $ = id => document.getElementById(id);
+
+/* ---------- Загрузка настроек ---------- */
+fetch('/api/config').then(r=>r.json()).then(cfg=>{
+  CONFIG = Object.assign(CONFIG, cfg);
+  $('payBtn').textContent = `Оплатить и примерить — ${CONFIG.price} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
+  if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
+  renderMannequins();
+  // Если вернулись с оплаты — сразу открыть шаг примерки
+  const oid = new URLSearchParams(location.search).get('order_id');
+  if(oid){ afterPayment(oid); }
+}).catch(()=>{});
+
+/* ---------- Шаг 1: загрузка ---------- */
+function pick(kind){
+  const tb = items.filter(i=>i.kind==='top'||i.kind==='bottom').length;
+  if((kind==='top'||kind==='bottom') && tb>=CONFIG.maxItems){
+    alert('Максимум '+CONFIG.maxItems+' вещей верх+низ.'); return;
+  }
+  if(kind==='extra' && items.filter(i=>i.kind==='extra').length>=3){
+    alert('Достаточно дополнительных вещей.'); return;
+  }
+  curKind = kind;
+  $('fileInput').click();
+}
+
+$('fileInput').addEventListener('change', e=>{
+  const f = e.target.files[0];
+  $('fileInput').value = '';
+  if(!f) return;
+  const img = new Image();
+  const rd = new FileReader();
+  rd.onload = ()=>{ img.onload = ()=>{
+    const data = downscale(img, 1024);
+    items.push({id:idc++, kind:curKind, dataUrl:data});
+    renderThumbs();
+  }; img.src = rd.result; };
+  rd.readAsDataURL(f);
+});
+
+function downscale(img, max){
+  let {width:w, height:h} = img;
+  if(Math.max(w,h) > max){ const k = max/Math.max(w,h); w=Math.round(w*k); h=Math.round(h*k); }
+  const c = document.createElement('canvas'); c.width=w; c.height=h;
+  c.getContext('2d').drawImage(img,0,0,w,h);
+  return c.toDataURL('image/jpeg', 0.9);
+}
+
+const KIND_LBL = {top:'Верх', bottom:'Низ', extra:'Доп.'};
+function renderThumbs(){
+  const box = $('thumbs'); box.innerHTML='';
+  items.forEach(it=>{
+    const d = document.createElement('div'); d.className='thumb';
+    d.innerHTML = `<img src="${it.dataUrl}">
+      <div class="lbl ${it.kind}">${KIND_LBL[it.kind]}</div>
+      <button class="del" onclick="removeItem(${it.id})">×</button>`;
+    box.appendChild(d);
+  });
+  updateStep1();
+}
+function removeItem(id){ items = items.filter(i=>i.id!==id); renderThumbs(); }
+
+function updateStep1(){
+  const tops = items.filter(i=>i.kind==='top').length;
+  const bottoms = items.filter(i=>i.kind==='bottom').length;
+  const ok = tops>=1 && bottoms>=1;
+  const note = $('countNote');
+  if(ok){ note.className='count-note ok'; note.textContent = `Готово: ${tops} верх, ${bottoms} низ. Можно оплачивать.`; }
+  else{ note.className='count-note bad'; note.textContent = 'Добавьте хотя бы один верх и один низ.'; }
+  $('card2').classList.toggle('dim', !ok);
+  $('payBtn').disabled = !ok;
+}
+
+/* ---------- Шаг 2: оплата ---------- */
+function garmentsForTryon(){
+  // Верх + низ (первые) + все дополнительные — до 8 картинок.
+  const top = items.find(i=>i.kind==='top');
+  const bottom = items.find(i=>i.kind==='bottom');
+  const extras = items.filter(i=>i.kind==='extra');
+  return [top, bottom, ...extras].filter(Boolean).map(i=>i.dataUrl).slice(0,8);
+}
+
+async function startPay(){
+  $('payErr').textContent='';
+  const garments = garmentsForTryon();
+  if(CONFIG.paymentsEnabled){
+    $('payBtn').disabled=true; $('payBtn').textContent='Создаём платёж…';
+    try{
+      const r = await fetch('/api/create-payment',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({itemCount: items.length})
+      });
+      if(!r.ok) throw new Error('create-payment');
+      const d = await r.json();
+      // Сохраняем одежду, чтобы примерить после возврата с оплаты
+      try{ sessionStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
+      location.href = d.confirmation_url;
+    }catch(e){
+      $('payErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
+      $('payBtn').disabled=false; $('payBtn').textContent=`Оплатить и примерить — ${CONFIG.price} ₽`;
+    }
+  } else {
+    // Тестовый режим: создаём тестовый заказ и сразу переходим к примерке
+    try{
+      const r = await fetch('/api/test-order',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({itemCount: items.length})
+      });
+      const d = await r.json();
+      try{ sessionStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
+      afterPayment(d.order_id);
+    }catch(e){ $('payErr').textContent='Тестовый режим недоступен.'; }
+  }
+}
+
+/* ---------- Шаг 3: манекены + примерка ---------- */
+function renderMannequins(){
+  const grid = $('manneGrid'); grid.innerHTML='';
+  const list = CONFIG.mannequins && CONFIG.mannequins.length ? CONFIG.mannequins
+             : [{id:1,hasVideo:false},{id:2,hasVideo:false},{id:3,hasVideo:false}];
+  list.forEach(m=>{
+    const d = document.createElement('div'); d.className='manne'; d.dataset.id=m.id;
+    const media = m.hasVideo
+      ? `<video src="/mannequin/${m.id}" muted loop autoplay playsinline></video>`
+      : `<img src="/model/${m.id}" alt="манекен ${m.id}">`;
+    d.innerHTML = media + `<span class="n">${m.id}</span>`;
+    d.onclick = ()=>selectMannequin(m.id);
+    grid.appendChild(d);
+  });
+}
+function selectMannequin(id){
+  selectedMannequin = id;
+  document.querySelectorAll('.manne').forEach(x=>x.classList.toggle('sel', +x.dataset.id===id));
+  $('tryonBtn').disabled = false;
+}
+
+function afterPayment(orderId){
+  currentOrderId = orderId;
+  $('card2').classList.add('dim');
+  $('card3').classList.remove('dim');
+  $('card3').scrollIntoView({behavior:'smooth', block:'start'});
+  // если одежда потерялась (например, другое устройство) — попросим не терять
+  if(!sessionStorage.getItem('primerka_g_'+orderId)){
+    $('tryonErr').textContent = 'Фото одежды не найдено в этом браузере. Откройте оплату в том же браузере, где загружали фото.';
+  }
+}
+
+async function startTryon(){
+  $('tryonErr').textContent='';
+  if(!selectedMannequin){ $('tryonErr').textContent='Выберите модель.'; return; }
+  let garments=[];
+  try{ garments = JSON.parse(sessionStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){}
+  if(!garments.length){ $('tryonErr').textContent='Нет фото одежды для примерки.'; return; }
+
+  $('tryonBtn').disabled=true;
+  $('card4').classList.remove('dim');
+  $('progress').style.display='block'; $('result').style.display='none';
+  $('card4').scrollIntoView({behavior:'smooth', block:'start'});
+
+  try{
+    const r = await fetch('/api/tryon',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: currentOrderId, mannequin: selectedMannequin, garments})
+    });
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'tryon'); }
+    const d = await r.json();
+    pollTryon(d.task_id);
+  }catch(e){
+    $('progress').style.display='none';
+    $('tryonErr').textContent = 'Не удалось запустить примерку: '+(e.message||'ошибка');
+    $('tryonBtn').disabled=false;
+  }
+}
+
+function pollTryon(taskId){
+  let n=0;
+  const iv = setInterval(async ()=>{
+    n++;
+    try{
+      const r = await fetch('/api/tryon/'+taskId, {cache:'no-store'});
+      const d = await r.json();
+      if(d.status==='done' && d.video){
+        clearInterval(iv);
+        showVideo(d.video);
+      } else if(d.status==='error'){
+        clearInterval(iv);
+        $('progress').style.display='none';
+        $('tryonErr').textContent = 'Примерка не удалась: '+(d.error||'ошибка сервиса');
+        $('tryonBtn').disabled=false;
+      } else {
+        $('progressText').textContent = `Готовим видео… (${n*3} сек)`;
+      }
+    }catch(e){}
+    if(n>90){ clearInterval(iv); $('progress').style.display='none';
+      $('tryonErr').textContent='Превышено время ожидания. Попробуйте ещё раз.';
+      $('tryonBtn').disabled=false; }
+  }, 3000);
+}
+
+function showVideo(url){
+  $('progress').style.display='none';
+  $('result').style.display='block';
+  $('resultVideo').src = url;
+  $('dlLink').href = url;
+  const lt = $('lookThumbs'); lt.innerHTML='';
+  garmentsForTryon().forEach(u=>{ const im=document.createElement('img'); im.src=u; lt.appendChild(im); });
+}
+</script>
+</body>
+</html>
