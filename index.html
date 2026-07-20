@@ -114,23 +114,26 @@
 
   <!-- ШАГ 3 -->
   <div class="card dim" id="card3">
-    <h2><span class="step-num">3</span> Выберите модель и примерьте</h2>
-    <div class="sub">Одежда «наденется» на выбранную модель в видео (~1–2 минуты).</div>
+    <h2><span class="step-num">3</span> Выберите модель</h2>
+    <div class="sub">Одежда «наденется» на выбранную модель.</div>
     <div class="manne-grid" id="manneGrid"></div>
-    <button class="btn" id="tryonBtn" disabled onclick="startTryon()">Примерить</button>
-    <div class="err" id="tryonErr"></div>
   </div>
 
   <!-- ШАГ 4 -->
   <div class="card dim" id="card4">
     <h2><span class="step-num">4</span> Ваш образ</h2>
+    <div class="sub">Выберите, что получить:</div>
+    <button class="btn" id="photoBtn" disabled onclick="startTryon('photo')" style="background:var(--green);">📷 Фото — быстро (~15–30 сек)</button>
+    <button class="btn" id="videoBtn" disabled onclick="startTryon('video')" style="margin-top:10px;">🎬 Видео — на модели (~1–2 мин)</button>
+    <div class="err" id="tryonErr"></div>
     <div class="progress" id="progress" style="display:none;">
       <div class="spinner"></div>
-      <div id="progressText">Готовим видео… это займёт минуту-другую.</div>
+      <div id="progressText">Готовим…</div>
     </div>
     <div class="result" id="result" style="display:none;">
-      <video id="resultVideo" controls autoplay loop muted playsinline></video>
-      <a class="dl" id="dlLink" href="#" download="primerka.mp4">⬇ Скачать видео</a>
+      <video id="resultVideo" controls autoplay loop muted playsinline style="display:none;"></video>
+      <img id="resultImage" alt="образ" style="width:100%; border-radius:14px; display:none;">
+      <a class="dl" id="dlLink" href="#" download="primerka">⬇ Скачать</a>
       <div class="look-thumbs" id="lookThumbs"></div>
     </div>
   </div>
@@ -279,7 +282,10 @@ function renderMannequins(){
 function selectMannequin(id){
   selectedMannequin = id;
   document.querySelectorAll('.manne').forEach(x=>x.classList.toggle('sel', +x.dataset.id===id));
-  $('tryonBtn').disabled = false;
+  $('card4').classList.remove('dim');
+  $('photoBtn').disabled = false;
+  $('videoBtn').disabled = false;
+  $('card4').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
 function afterPayment(orderId){
@@ -291,7 +297,7 @@ function afterPayment(orderId){
   $('card3').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-async function startTryon(){
+async function startTryon(kind){
   $('tryonErr').textContent='';
   if(!selectedMannequin){ $('tryonErr').textContent='Выберите модель.'; return; }
   // Фото одежды уже сохранены на сервере при оплате. Локальную копию отправим
@@ -299,60 +305,72 @@ async function startTryon(){
   let garments=[];
   try{ garments = JSON.parse(localStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){}
 
-  $('tryonBtn').disabled=true;
-  $('card4').classList.remove('dim');
+  $('photoBtn').disabled=true; $('videoBtn').disabled=true;
   $('progress').style.display='block'; $('result').style.display='none';
-  $('card4').scrollIntoView({behavior:'smooth', block:'start'});
+  $('progressText').textContent = kind==='photo'
+    ? 'Готовим фото… это займёт несколько секунд.'
+    : 'Готовим видео… это займёт минуту-другую.';
 
   try{
     const r = await fetch('/api/tryon',{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({order_id: currentOrderId, mannequin: selectedMannequin, garments})
+      body: JSON.stringify({order_id: currentOrderId, mannequin: selectedMannequin, kind, garments})
     });
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'tryon'); }
     const d = await r.json();
-    pollTryon(d.task_id);
+    pollTryon(d.task_id, kind);
   }catch(e){
     $('progress').style.display='none';
     $('tryonErr').textContent = 'Не удалось запустить примерку: '+(e.message||'ошибка');
-    $('tryonBtn').disabled=false;
+    $('photoBtn').disabled=false; $('videoBtn').disabled=false;
   }
 }
 
-function pollTryon(taskId){
+function pollTryon(taskId, kind){
   let n=0;
+  const label = kind==='photo' ? 'фото' : 'видео';
   const iv = setInterval(async ()=>{
     n++;
     try{
       const r = await fetch('/api/tryon/'+taskId, {cache:'no-store'});
       const d = await r.json();
-      if(d.status==='done' && d.video){
+      if(d.status==='done' && d.url){
         clearInterval(iv);
-        showVideo(d.video);
+        showResult(d.url, d.kind || kind);
+        $('photoBtn').disabled=false; $('videoBtn').disabled=false;
       } else if(d.status==='error'){
         clearInterval(iv);
         $('progress').style.display='none';
         $('tryonErr').textContent = 'Примерка не удалась: '+(d.error||'ошибка сервиса');
-        $('tryonBtn').disabled=false;
+        $('photoBtn').disabled=false; $('videoBtn').disabled=false;
       } else {
-        $('progressText').textContent = `Готовим видео… (${n*3} сек)`;
+        $('progressText').textContent = `Готовим ${label}… (${n*3} сек)`;
       }
     }catch(e){}
-    if(n>90){ clearInterval(iv); $('progress').style.display='none';
+    if(n>100){ clearInterval(iv); $('progress').style.display='none';
       $('tryonErr').textContent='Превышено время ожидания. Попробуйте ещё раз.';
-      $('tryonBtn').disabled=false; }
+      $('photoBtn').disabled=false; $('videoBtn').disabled=false; }
   }, 3000);
 }
 
-function showVideo(url){
+function showResult(url, kind){
   $('progress').style.display='none';
   $('result').style.display='block';
-  $('resultVideo').src = url;
+  const vid=$('resultVideo'), img=$('resultImage');
+  if(kind==='photo'){
+    vid.style.display='none'; vid.removeAttribute('src');
+    img.style.display='block'; img.src=url;
+    $('dlLink').setAttribute('download','primerka.jpg');
+  } else {
+    img.style.display='none'; img.removeAttribute('src');
+    vid.style.display='block'; vid.src=url;
+    $('dlLink').setAttribute('download','primerka.mp4');
+  }
   $('dlLink').href = url;
   const lt = $('lookThumbs'); lt.innerHTML='';
   let thumbs = garmentsForTryon();
   if(!thumbs.length){ try{ thumbs = JSON.parse(localStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){} }
-  thumbs.forEach(u=>{ const im=document.createElement('img'); im.src=u; lt.appendChild(im); });
+  thumbs.forEach(u=>{ const t=document.createElement('img'); t.src=u; lt.appendChild(t); });
 }
 </script>
 </body>

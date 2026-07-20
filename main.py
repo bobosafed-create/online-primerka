@@ -47,9 +47,12 @@ DEFAULT_PRICE = os.getenv("SERVICE_PRICE", "99.00")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 ADMIN_TOKEN = uuid.uuid4().hex  # обновляется при каждом запуске сервера
 
-# WaveSpeedAI — видео-примерка
+# WaveSpeedAI — примерка. Две модели: быстрая картинка и видео.
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_MODEL = os.getenv("WAVESPEED_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
+# «Видео» — движущийся манекен (~1–2 мин). «Фото» — быстрая картинка (~15–30 сек).
+WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", WAVESPEED_MODEL).strip()
+WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
 TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
@@ -332,6 +335,7 @@ def order_status(order_id: str):
 class TryOnIn(BaseModel):
     order_id: str
     mannequin: int = 1
+    kind: str = "video"               # "photo" (быстро) или "video"
     garments: List[str] = []          # dataURL картинок одежды (верх, низ, доп.)
 
 
@@ -381,9 +385,11 @@ def stored_garment_urls(order_id):
         return []
 
 
-def _wavespeed_create(portrait_url, clothes_urls):
-    url = f"{WAVESPEED_BASE}/{WAVESPEED_MODEL}"
-    body = {"image": portrait_url, "clothes_images": clothes_urls, "duration": TRYON_DURATION}
+def _wavespeed_create(portrait_url, clothes_urls, model, with_duration):
+    url = f"{WAVESPEED_BASE}/{model}"
+    body = {"image": portrait_url, "clothes_images": clothes_urls}
+    if with_duration:
+        body["duration"] = TRYON_DURATION
     if TRYON_PROMPT:
         body["prompt"] = TRYON_PROMPT
     r = requests.post(
@@ -421,28 +427,31 @@ def _wavespeed_poll(poll_url):
     return status, video
 
 
-def _run_tryon(task_id, mannequin, clothes_urls):
-    TASKS[task_id] = {"status": "processing", "video": None, "error": None}
+def _run_tryon(task_id, mannequin, clothes_urls, kind):
+    TASKS[task_id] = {"status": "processing", "url": None, "kind": kind, "error": None}
     try:
         portrait = f"{SITE_URL}/model/{mannequin}"
         clothes = [u for u in (clothes_urls or []) if u][:8]
         if not clothes:
             raise RuntimeError("нет изображений одежды")
-        pred_id, poll_url = _wavespeed_create(portrait, clothes)
+        is_video = (kind == "video")
+        model = WAVESPEED_VIDEO_MODEL if is_video else WAVESPEED_PHOTO_MODEL
+        pred_id, poll_url = _wavespeed_create(portrait, clothes, model, is_video)
         if not poll_url:
             raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        # Опрос до готовности (видео обычно ~60-120 сек).
-        for _ in range(80):  # ~4 минуты максимум
+        # Видео обычно ~60–120 сек, картинка — ~10–30 сек.
+        max_polls = 80 if is_video else 30
+        for _ in range(max_polls):
             time.sleep(3)
-            status, video = _wavespeed_poll(poll_url)
-            if status in ("completed", "succeeded", "success") and video:
-                TASKS[task_id] = {"status": "done", "video": video, "error": None}
+            status, url = _wavespeed_poll(poll_url)
+            if status in ("completed", "succeeded", "success") and url:
+                TASKS[task_id] = {"status": "done", "url": url, "kind": kind, "error": None}
                 return
             if status in ("failed", "error", "canceled"):
                 raise RuntimeError(f"WaveSpeed вернул статус: {status}")
-        raise RuntimeError("превышено время ожидания видео")
+        raise RuntimeError("превышено время ожидания результата")
     except Exception as e:
-        TASKS[task_id] = {"status": "error", "video": None, "error": str(e)}
+        TASKS[task_id] = {"status": "error", "url": None, "kind": kind, "error": str(e)}
 
 
 @app.post("/api/tryon")
@@ -463,9 +472,10 @@ def start_tryon(data: TryOnIn):
         raise HTTPException(400, "Нет фото одежды")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
         available_mannequins()[0]["id"] if available_mannequins() else 1)
+    kind = "photo" if str(data.kind).lower() == "photo" else "video"
     task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "video": None, "error": None}
-    threading.Thread(target=_run_tryon, args=(task_id, mannequin, clothes),
+    TASKS[task_id] = {"status": "processing", "url": None, "kind": kind, "error": None}
+    threading.Thread(target=_run_tryon, args=(task_id, mannequin, clothes, kind),
                      daemon=True).start()
     return {"task_id": task_id}
 
