@@ -48,6 +48,8 @@
   .count-note{font-size:13px; margin-top:12px;}
   .count-note.ok{color:var(--green);}
   .count-note.bad{color:var(--muted);}
+  .cam-hint{margin-top:10px; font-size:13px; line-height:1.45; color:#8a5a00;
+            background:#fff5e0; border:1px solid #ffe1a8; border-radius:10px; padding:10px 12px;}
 
   .btn{display:block; width:100%; border:none; border-radius:14px; padding:16px;
        font-size:17px; font-weight:800; color:#fff; background:var(--accent); cursor:pointer;
@@ -100,6 +102,7 @@
     </div>
     <div class="thumbs" id="thumbs"></div>
     <div class="count-note bad" id="countNote">Добавьте минимум одну вещь верх и одну вещь низ.</div>
+    <div class="cam-hint">📷 После создания ФОТО появляется галочка ✓ в нижнем правом углу экрана телефона. Не забывайте нажать на эту галочку, иначе вещь на фото не появится в вашем гардеробе.</div>
     <input type="file" id="fileInput" accept="image/*">
     <input type="file" id="cameraInput" accept="image/*" capture="environment">
   </div>
@@ -107,7 +110,7 @@
   <!-- ШАГ 2 -->
   <div class="card dim" id="card2">
     <h2><span class="step-num">2</span> Оплата <span id="testBadge" class="badge" style="display:none;">тест</span></h2>
-    <div class="sub">Оплата через ЮKassa. Видео-примерка откроется сразу после оплаты.</div>
+    <div class="sub">Оплата через ЮKassa. Фото образа и видео-примерка откроются сразу после оплаты.</div>
     <button class="btn" id="payBtn" disabled onclick="startPay()">Оплатить и примерить</button>
     <div class="err" id="payErr"></div>
   </div>
