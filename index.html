@@ -25,13 +25,13 @@
             display:inline-flex; align-items:center; justify-content:center; font-size:14px; font-weight:700;}
   .sub{color:var(--muted); font-size:13.5px; margin:2px 0 14px;}
 
-  .addrow{display:flex; gap:10px; flex-wrap:wrap;}
-  .addbtn{flex:1; min-width:120px; border:none; border-radius:12px; padding:14px 10px;
-          font-size:15px; font-weight:700; color:#fff; cursor:pointer;}
-  .addbtn.top{background:var(--green);}
-  .addbtn.bottom{background:var(--amber);}
-  .addbtn.extra{background:#8a8f98;}
-  .addbtn:active{transform:scale(.98);}
+  .photo-actions{display:flex; flex-direction:column; align-items:center; gap:10px; margin-top:4px;}
+  .ovalbtn{width:100%; border:none; border-radius:40px; color:#fff; font-weight:800; cursor:pointer;
+           box-shadow:0 5px 14px rgba(0,0,0,.12);}
+  .ovalbtn:active{transform:scale(.98);}
+  .ovalbtn.cam{background:var(--green); font-size:20px; padding:20px 12px;}
+  .ovalbtn.gal{background:var(--amber); font-size:16px; padding:15px 12px;}
+  .or{color:var(--muted); font-size:13px; font-weight:700; letter-spacing:1px;}
 
   .thumbs{display:flex; flex-wrap:wrap; gap:10px; margin-top:14px;}
   .thumb{position:relative; width:80px; height:100px; border-radius:10px; overflow:hidden;
@@ -56,7 +56,7 @@
   .btn:active:not(:disabled){transform:scale(.99);}
 
   /* Манекены */
-  .manne-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:6px 0 16px;}
+  .manne-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; margin:6px 0 16px;}
   .manne{border:2px solid var(--line); border-radius:14px; overflow:hidden; cursor:pointer;
          background:#000; aspect-ratio:3/4; position:relative;}
   .manne.sel{border-color:var(--accent); box-shadow:0 0 0 3px rgba(229,57,91,.18);}
@@ -92,15 +92,16 @@
   <!-- ШАГ 1 -->
   <div class="card" id="card1">
     <h2><span class="step-num">1</span> Загрузите одежду</h2>
-    <div class="sub">Нужны минимум верх и низ. Всего верх+низ — до 6 вещей. Дополнительно можно добавить головной убор, обувь, аксессуар.</div>
-    <div class="addrow">
-      <button class="addbtn top" onclick="pick('top')">＋ Верх</button>
-      <button class="addbtn bottom" onclick="pick('bottom')">＋ Низ</button>
-      <button class="addbtn extra" onclick="pick('extra')">＋ Дополнительно</button>
+    <div class="sub">Нужны минимум — одна вещь верх (футболка, рубашка, блузка) и одна вещь низ (шорты, брюки, юбка). Всего верх + низ — до 6 вещей. Дополнительно можно добавить головной убор, обувь, аксессуар.</div>
+    <div class="photo-actions">
+      <button class="ovalbtn cam" onclick="pickCamera()">📷 Сделать ФОТО</button>
+      <div class="or">ИЛИ</div>
+      <button class="ovalbtn gal" onclick="pickGallery()">Загрузить из ГАЛЕРЕИ</button>
     </div>
     <div class="thumbs" id="thumbs"></div>
-    <div class="count-note bad" id="countNote">Добавьте хотя бы один верх и один низ.</div>
+    <div class="count-note bad" id="countNote">Добавьте минимум одну вещь верх и одну вещь низ.</div>
     <input type="file" id="fileInput" accept="image/*">
+    <input type="file" id="cameraInput" accept="image/*" capture="environment">
   </div>
 
   <!-- ШАГ 2 -->
@@ -165,31 +166,31 @@ fetch('/api/config').then(r=>r.json()).then(cfg=>{
 }).catch(()=>{});
 
 /* ---------- Шаг 1: загрузка ---------- */
-function pick(kind){
-  const tb = items.filter(i=>i.kind==='top'||i.kind==='bottom').length;
-  if((kind==='top'||kind==='bottom') && tb>=CONFIG.maxItems){
-    alert('Максимум '+CONFIG.maxItems+' вещей верх+низ.'); return;
-  }
-  if(kind==='extra' && items.filter(i=>i.kind==='extra').length>=3){
-    alert('Достаточно дополнительных вещей.'); return;
-  }
-  curKind = kind;
+const MAX_ITEMS = 8;   // до 6 верх+низ + пара дополнительных, лимит сервиса — 8
+function pickCamera(){
+  if(items.length>=MAX_ITEMS){ alert('Достаточно вещей для примерки.'); return; }
+  $('cameraInput').click();
+}
+function pickGallery(){
+  if(items.length>=MAX_ITEMS){ alert('Достаточно вещей для примерки.'); return; }
   $('fileInput').click();
 }
 
-$('fileInput').addEventListener('change', e=>{
-  const f = e.target.files[0];
-  $('fileInput').value = '';
+function handlePicked(input){
+  const f = input.files[0];
+  input.value = '';
   if(!f) return;
   const img = new Image();
   const rd = new FileReader();
   rd.onload = ()=>{ img.onload = ()=>{
     const data = downscale(img, 1024);
-    items.push({id:idc++, kind:curKind, dataUrl:data});
+    items.push({id:idc++, dataUrl:data});
     renderThumbs();
   }; img.src = rd.result; };
   rd.readAsDataURL(f);
-});
+}
+document.getElementById('fileInput').addEventListener('change', e=>handlePicked(e.target));
+document.getElementById('cameraInput').addEventListener('change', e=>handlePicked(e.target));
 
 function downscale(img, max){
   let {width:w, height:h} = img;
@@ -199,13 +200,11 @@ function downscale(img, max){
   return c.toDataURL('image/jpeg', 0.9);
 }
 
-const KIND_LBL = {top:'Верх', bottom:'Низ', extra:'Доп.'};
 function renderThumbs(){
   const box = $('thumbs'); box.innerHTML='';
   items.forEach(it=>{
     const d = document.createElement('div'); d.className='thumb';
     d.innerHTML = `<img src="${it.dataUrl}">
-      <div class="lbl ${it.kind}">${KIND_LBL[it.kind]}</div>
       <button class="del" onclick="removeItem(${it.id})">×</button>`;
     box.appendChild(d);
   });
@@ -214,23 +213,17 @@ function renderThumbs(){
 function removeItem(id){ items = items.filter(i=>i.id!==id); renderThumbs(); }
 
 function updateStep1(){
-  const tops = items.filter(i=>i.kind==='top').length;
-  const bottoms = items.filter(i=>i.kind==='bottom').length;
-  const ok = tops>=1 && bottoms>=1;
+  const ok = items.length >= 2;   // минимум одна вещь верх и одна низ
   const note = $('countNote');
-  if(ok){ note.className='count-note ok'; note.textContent = `Готово: ${tops} верх, ${bottoms} низ. Можно оплачивать.`; }
-  else{ note.className='count-note bad'; note.textContent = 'Добавьте хотя бы один верх и один низ.'; }
+  if(ok){ note.className='count-note ok'; note.textContent = `Добавлено вещей: ${items.length}. Можно оплачивать.`; }
+  else{ note.className='count-note bad'; note.textContent = 'Добавьте минимум одну вещь верх и одну вещь низ.'; }
   $('card2').classList.toggle('dim', !ok);
   $('payBtn').disabled = !ok;
 }
 
 /* ---------- Шаг 2: оплата ---------- */
 function garmentsForTryon(){
-  // Верх + низ (первые) + все дополнительные — до 8 картинок.
-  const top = items.find(i=>i.kind==='top');
-  const bottom = items.find(i=>i.kind==='bottom');
-  const extras = items.filter(i=>i.kind==='extra');
-  return [top, bottom, ...extras].filter(Boolean).map(i=>i.dataUrl).slice(0,8);
+  return items.map(i=>i.dataUrl).slice(0, MAX_ITEMS);
 }
 
 async function startPay(){
@@ -276,7 +269,7 @@ function renderMannequins(){
     const media = m.hasVideo
       ? `<video src="/mannequin/${m.id}" muted loop autoplay playsinline></video>`
       : `<img src="/model/${m.id}" alt="манекен ${m.id}">`;
-    d.innerHTML = media + `<span class="n">${m.id}</span>`;
+    d.innerHTML = media;
     d.onclick = ()=>selectMannequin(m.id);
     grid.appendChild(d);
   });
