@@ -55,6 +55,10 @@ WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", WAVESPEED_MODEL).stri
 WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
 TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
+# По умолчанию поле duration НЕ отправляем (у модели по умолчанию 5 сек) —
+# так тело запроса совпадает с рабочим запросом фото-модели. Если нужно
+# управлять длиной ролика, задайте TRYON_SEND_DURATION=1.
+TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
 
 if _YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
@@ -398,7 +402,13 @@ def _wavespeed_create(portrait_url, clothes_urls, model, with_duration):
                  "Content-Type": "application/json"},
         json=body, timeout=60,
     )
-    r.raise_for_status()
+    if r.status_code >= 400:
+        detail = ""
+        try:
+            detail = r.text[:400]
+        except Exception:
+            pass
+        raise RuntimeError(f"WaveSpeed {r.status_code}: {detail}")
     j = r.json()
     data = j.get("data", j)
     pred_id = data.get("id") or j.get("id")
@@ -436,7 +446,8 @@ def _run_tryon(task_id, mannequin, clothes_urls, kind):
             raise RuntimeError("нет изображений одежды")
         is_video = (kind == "video")
         model = WAVESPEED_VIDEO_MODEL if is_video else WAVESPEED_PHOTO_MODEL
-        pred_id, poll_url = _wavespeed_create(portrait, clothes, model, is_video)
+        with_duration = is_video and TRYON_SEND_DURATION
+        pred_id, poll_url = _wavespeed_create(portrait, clothes, model, with_duration)
         if not poll_url:
             raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
         # Видео обычно ~60–120 сек, картинка — ~10–30 сек.
