@@ -266,6 +266,7 @@ def config():
 # ------------------------------------------------------------------ Оплата ----
 class CreatePaymentIn(BaseModel):
     itemCount: int = 0
+    garments: List[str] = []      # dataURL фото одежды — сохраняем на сервере
 
 
 @app.post("/api/create-payment")
@@ -281,6 +282,10 @@ def create_payment(data: CreatePaymentIn):
             (order_id, int(data.itemCount or 0), price, now_iso()),
         )
         conn.commit()
+
+    # Сохраняем фото одежды на сервере — чтобы примерка работала после возврата
+    # с оплаты (СБП) независимо от браузера/вкладки, где загружали фото.
+    _store_garments(order_id, data.garments)
 
     payment = Payment.create(
         {
@@ -343,6 +348,39 @@ def _save_dataurl(data_url):
     return f"{SITE_URL}/api/img/{token}"
 
 
+def _garment_index_path(order_id):
+    return os.path.join(IMG_DIR, f"order_{order_id}.json")
+
+
+def _store_garments(order_id, garments):
+    """Сохраняет фото одежды заказа на сервере и запоминает их публичные ссылки."""
+    urls = []
+    for g in (garments or []):
+        if not g:
+            continue
+        try:
+            urls.append(_save_dataurl(g))
+        except Exception:
+            pass
+        if len(urls) >= 8:
+            break
+    if urls:
+        try:
+            with open(_garment_index_path(order_id), "w") as f:
+                json.dump(urls, f)
+        except Exception as e:
+            print("store garments warn:", e)
+    return urls
+
+
+def stored_garment_urls(order_id):
+    try:
+        with open(_garment_index_path(order_id)) as f:
+            return json.load(f)
+    except Exception:
+        return []
+
+
 def _wavespeed_create(portrait_url, clothes_urls):
     url = f"{WAVESPEED_BASE}/{WAVESPEED_MODEL}"
     body = {"image": portrait_url, "clothes_images": clothes_urls, "duration": TRYON_DURATION}
@@ -383,11 +421,11 @@ def _wavespeed_poll(poll_url):
     return status, video
 
 
-def _run_tryon(task_id, mannequin, garments):
+def _run_tryon(task_id, mannequin, clothes_urls):
     TASKS[task_id] = {"status": "processing", "video": None, "error": None}
     try:
         portrait = f"{SITE_URL}/model/{mannequin}"
-        clothes = [_save_dataurl(g) for g in garments if g][:8]
+        clothes = [u for u in (clothes_urls or []) if u][:8]
         if not clothes:
             raise RuntimeError("нет изображений одежды")
         pred_id, poll_url = _wavespeed_create(portrait, clothes)
@@ -416,13 +454,18 @@ def start_tryon(data: TryOnIn):
         raise HTTPException(402, "Оплата не найдена или ещё не подтверждена")
     if not tryon_enabled():
         raise HTTPException(503, "Примерка не настроена (нет ключа WaveSpeed или манекенов)")
-    if not data.garments:
+    # Картинки одежды: сначала берём сохранённые на сервере при оплате;
+    # если их нет (демо/тест) — принимаем из запроса и сохраняем.
+    clothes = stored_garment_urls(data.order_id)
+    if not clothes and data.garments:
+        clothes = _store_garments(data.order_id, data.garments)
+    if not clothes:
         raise HTTPException(400, "Нет фото одежды")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
         available_mannequins()[0]["id"] if available_mannequins() else 1)
     task_id = uuid.uuid4().hex
     TASKS[task_id] = {"status": "processing", "video": None, "error": None}
-    threading.Thread(target=_run_tryon, args=(task_id, mannequin, data.garments),
+    threading.Thread(target=_run_tryon, args=(task_id, mannequin, clothes),
                      daemon=True).start()
     return {"task_id": task_id}
 
