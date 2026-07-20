@@ -232,14 +232,16 @@ async function startPay(){
   if(CONFIG.paymentsEnabled){
     $('payBtn').disabled=true; $('payBtn').textContent='Создаём платёж…';
     try{
+      // Фото одежды отправляем на сервер сразу — там они сохранятся и будут
+      // доступны для примерки после возврата с оплаты (СБП), в любой вкладке.
       const r = await fetch('/api/create-payment',{
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({itemCount: items.length})
+        body: JSON.stringify({itemCount: items.length, garments})
       });
       if(!r.ok) throw new Error('create-payment');
       const d = await r.json();
-      // Сохраняем одежду, чтобы примерить после возврата с оплаты
-      try{ sessionStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
+      // Дублируем в localStorage (переживает переход между вкладками на телефоне)
+      try{ localStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
       location.href = d.confirmation_url;
     }catch(e){
       $('payErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
@@ -253,7 +255,7 @@ async function startPay(){
         body: JSON.stringify({itemCount: items.length})
       });
       const d = await r.json();
-      try{ sessionStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
+      try{ localStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
       afterPayment(d.order_id);
     }catch(e){ $('payErr').textContent='Тестовый режим недоступен.'; }
   }
@@ -282,21 +284,20 @@ function selectMannequin(id){
 
 function afterPayment(orderId){
   currentOrderId = orderId;
-  $('card2').classList.add('dim');
+  // Шаги 1 и 2 уже пройдены — прячем их, показываем выбор модели.
+  $('card1').style.display='none';
+  $('card2').style.display='none';
   $('card3').classList.remove('dim');
   $('card3').scrollIntoView({behavior:'smooth', block:'start'});
-  // если одежда потерялась (например, другое устройство) — попросим не терять
-  if(!sessionStorage.getItem('primerka_g_'+orderId)){
-    $('tryonErr').textContent = 'Фото одежды не найдено в этом браузере. Откройте оплату в том же браузере, где загружали фото.';
-  }
 }
 
 async function startTryon(){
   $('tryonErr').textContent='';
   if(!selectedMannequin){ $('tryonErr').textContent='Выберите модель.'; return; }
+  // Фото одежды уже сохранены на сервере при оплате. Локальную копию отправим
+  // как запасной вариант (для тестового режима).
   let garments=[];
-  try{ garments = JSON.parse(sessionStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){}
-  if(!garments.length){ $('tryonErr').textContent='Нет фото одежды для примерки.'; return; }
+  try{ garments = JSON.parse(localStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){}
 
   $('tryonBtn').disabled=true;
   $('card4').classList.remove('dim');
@@ -349,7 +350,9 @@ function showVideo(url){
   $('resultVideo').src = url;
   $('dlLink').href = url;
   const lt = $('lookThumbs'); lt.innerHTML='';
-  garmentsForTryon().forEach(u=>{ const im=document.createElement('img'); im.src=u; lt.appendChild(im); });
+  let thumbs = garmentsForTryon();
+  if(!thumbs.length){ try{ thumbs = JSON.parse(localStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){} }
+  thumbs.forEach(u=>{ const im=document.createElement('img'); im.src=u; lt.appendChild(im); });
 }
 </script>
 </body>
