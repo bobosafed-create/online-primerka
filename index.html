@@ -260,9 +260,10 @@ const $ = id => document.getElementById(id);
 /* ---------- Загрузка настроек ---------- */
 fetch('/api/config').then(r=>r.json()).then(cfg=>{
   CONFIG = Object.assign(CONFIG, cfg);
-  $('payBtn').textContent = `Оплатить и примерить — ${CONFIG.price} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
-  $('heroPrice').textContent = CONFIG.price;
-  $('heroCtaPrice').textContent = CONFIG.price;
+  const displayPrice = String(CONFIG.price).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
+  $('payBtn').textContent = `Оплатить и примерить — ${displayPrice} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
+  $('heroPrice').textContent = displayPrice;
+  $('heroCtaPrice').textContent = displayPrice;
   if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
   renderMannequins();
   // Если вернулись с оплаты — сразу открыть шаг примерки
