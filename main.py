@@ -51,7 +51,7 @@ ADMIN_TOKEN = uuid.uuid4().hex  # обновляется при каждом з�
 # WaveSpeedAI — примерка. Две модели: быстрая картинка и видео.
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_MODEL = os.getenv("WAVESPEED_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
-# «Видео» — движущийся манекен (~1–2 мин). «Фото» — быстрая картинка (~15–30 сек).
+# «Видео» — движущийся манекен (обычно 2–4 мин). «Фото» — обычно до минуты.
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", WAVESPEED_MODEL).strip()
 WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
@@ -459,7 +459,7 @@ def _run_tryon(task_id, mannequin, clothes_urls, kind):
         pred_id, poll_url = _wavespeed_create(portrait, clothes, model, with_duration)
         if not poll_url:
             raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        # Видео обычно ~60–120 сек, картинка — ~10–30 сек.
+        # Видео обычно 2–4 мин, картинка — обычно до минуты.
         max_polls = 80 if is_video else 30
         for _ in range(max_polls):
             time.sleep(3)
