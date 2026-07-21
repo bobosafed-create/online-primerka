@@ -11,11 +11,57 @@
     --ink:#1d1d22; --muted:#6c6c76; --bg:#f5f3f1; --card:#fff; --line:#eceae6;
   }
   *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
   body{margin:0; font-family:'Helvetica Neue',Arial,sans-serif; background:var(--bg); color:var(--ink);}
-  .wrap{max-width:620px; margin:0 auto; padding:18px 16px 60px;}
-  header{text-align:center; margin-bottom:14px;}
-  h1{font-family:Georgia,serif; font-size:26px; margin:6px 0 4px;}
-  header p{color:var(--muted); font-size:14px; margin:0;}
+  .wrap{max-width:720px; margin:0 auto; padding:12px 14px 60px;}
+  .site-header{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 2px 12px;}
+  .brand{font-family:Georgia,serif; font-size:20px; font-weight:700; letter-spacing:-.2px;}
+  .launch-price{font-size:12px; color:var(--muted); background:#fff; border:1px solid var(--line);
+                border-radius:999px; padding:7px 10px; white-space:nowrap;}
+
+  .hero{position:relative; overflow:hidden; background:linear-gradient(145deg,#fff 0%,#fff8f3 100%);
+        border:1px solid #eadfd8; border-radius:24px; padding:20px 16px 16px; margin-bottom:16px;
+        box-shadow:0 14px 34px rgba(65,38,28,.08);}
+  .hero:before{content:""; position:absolute; width:180px; height:180px; border-radius:50%;
+               background:rgba(229,57,91,.08); top:-95px; right:-80px; pointer-events:none;}
+  .eyebrow{display:inline-flex; align-items:center; gap:7px; margin:0 0 9px; color:var(--accent-dark);
+           font-size:11px; line-height:1; font-weight:800; letter-spacing:.09em; text-transform:uppercase;}
+  .eyebrow:before{content:""; width:7px; height:7px; border-radius:50%; background:var(--accent);}
+  .hero h1{max-width:590px; font-family:Georgia,serif; font-size:clamp(29px,8vw,43px); line-height:1.04;
+           letter-spacing:-.7px; margin:0 0 10px; color:#251c1f;}
+  .hero-lead{max-width:590px; color:#5f5559; font-size:15px; line-height:1.48; margin:0 0 16px;}
+  .hero-lead strong{color:var(--ink);}
+
+  .hero-demo{display:grid; grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr); gap:9px;
+             align-items:stretch; margin:0 0 15px;}
+  .before-pair{display:grid; grid-template-rows:1fr 1fr; gap:8px; min-width:0;}
+  .demo-frame{position:relative; min-width:0; overflow:hidden; background:#eee9e5; border:1px solid #e4ddd8;
+              border-radius:15px; box-shadow:0 5px 16px rgba(58,41,34,.08);}
+  .before-pair .demo-frame{aspect-ratio:1/1;}
+  .after-frame{min-height:0;}
+  .demo-frame img{width:100%; height:100%; display:block; object-fit:cover;}
+  .before-pair img{object-position:center 22%;}
+  .after-frame img{object-position:28% 10%;}
+  .demo-label{position:absolute; left:7px; top:7px; z-index:1; color:#fff; background:rgba(29,29,34,.78);
+              border-radius:999px; padding:4px 7px; font-size:9.5px; font-weight:800; letter-spacing:.02em;}
+  .after-frame .demo-label{background:rgba(57,179,106,.92);}
+  .demo-arrow{position:absolute; z-index:2; left:calc(36% - 13px); top:50%; transform:translate(-50%,-50%);
+              width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+              border:3px solid #fff; border-radius:50%; background:var(--accent); color:#fff;
+              font-size:16px; font-weight:900; box-shadow:0 4px 14px rgba(0,0,0,.18);}
+
+  .hero-cta{display:flex; width:100%; align-items:center; justify-content:center; min-height:56px; border:none;
+            border-radius:16px; padding:15px 18px; color:#fff; background:var(--accent); text-decoration:none;
+            text-align:center; font-size:17px; font-weight:850; box-shadow:0 8px 20px rgba(229,57,91,.28);}
+  .hero-cta:active{transform:scale(.99);}
+  .demo-video{margin-top:9px; border:1px solid var(--line); border-radius:14px; background:#fff; overflow:hidden;}
+  .demo-video summary{padding:12px 14px; color:var(--accent-dark); font-size:13px; font-weight:800;
+                      text-align:center; cursor:pointer; list-style-position:inside;}
+  .demo-video video{display:block; width:100%; max-height:500px; background:#000;}
+  .trust-list{display:flex; flex-wrap:wrap; justify-content:center; gap:6px 12px; list-style:none;
+              padding:0; margin:12px 0 0; color:#6f6569; font-size:11.5px;}
+  .trust-list li:before{content:"✓"; color:var(--green); font-weight:900; margin-right:4px;}
+  .model-note{margin:10px 0 0; color:#81777b; text-align:center; font-size:10.5px; line-height:1.35;}
 
   .card{background:var(--card); border:1px solid var(--line); border-radius:16px;
         padding:18px; margin-bottom:16px; box-shadow:0 2px 10px rgba(0,0,0,.03);}
@@ -82,14 +128,64 @@
   .badge{display:inline-block; background:#fff0d6; color:#a56a00; border-radius:8px;
          padding:3px 9px; font-size:12px; font-weight:700; margin-left:6px;}
   input[type=file]{display:none;}
+
+  @media (min-width:560px){
+    .wrap{padding:18px 18px 72px;}
+    .hero{padding:28px 26px 22px;}
+    .hero-demo{gap:12px;}
+    .demo-arrow{left:calc(38% - 14px); width:34px; height:34px;}
+    .trust-list{font-size:12.5px;}
+  }
+
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto;} *{animation-duration:.01ms!important;}}
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <h1>Онлайн примерка</h1>
-    <p>Загрузите одежду — увидите её на фото модели и в коротком видео.</p>
+  <header class="site-header">
+    <div class="brand">Онлайн примерка</div>
+    <div class="launch-price">Цена запуска — <strong><span id="heroPrice">99</span> ₽</strong></div>
   </header>
+
+  <main>
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="eyebrow">Ваши вещи на модели</div>
+    <h1 id="hero-title">Посмотрите, как ваши вещи выглядят на модели</h1>
+    <p class="hero-lead">Загрузите фото <strong>верха и низа</strong> — получите готовый образ за 15–30 секунд или короткое видео за 1–2 минуты.</p>
+
+    <div class="hero-demo" aria-label="Пример результата до и после">
+      <div class="before-pair">
+        <figure class="demo-frame" style="margin:0;">
+          <span class="demo-label">Верх</span>
+          <img src="assets/before-top.jpg" alt="Исходная красная рубашка" width="1024" height="1024" fetchpriority="high">
+        </figure>
+        <figure class="demo-frame" style="margin:0;">
+          <span class="demo-label">Низ</span>
+          <img src="assets/before-bottom.jpg" alt="Исходные белые брюки" width="1024" height="1024" fetchpriority="high">
+        </figure>
+      </div>
+      <figure class="demo-frame after-frame" style="margin:0;">
+        <span class="demo-label">Готовый образ</span>
+        <img src="assets/after-result.jpg" alt="Красная рубашка и белые брюки на женской модели" width="1536" height="1173" fetchpriority="high">
+      </figure>
+      <span class="demo-arrow" aria-hidden="true">→</span>
+    </div>
+
+    <a class="hero-cta" id="heroCta" href="#card1">Начать примерку за <span id="heroCtaPrice">99</span> ₽</a>
+    <details class="demo-video">
+      <summary>Посмотреть короткое видео результата</summary>
+      <video controls muted loop playsinline preload="none" poster="assets/after-result.jpg">
+        <source src="assets/result-video.mp4" type="video/mp4">
+        Ваш браузер не поддерживает воспроизведение видео.
+      </video>
+    </details>
+    <ul class="trust-list" aria-label="Преимущества сервиса">
+      <li>Работает в браузере</li>
+      <li>Без установки</li>
+      <li>Оплата через ЮKassa</li>
+    </ul>
+    <p class="model-note">Результат создаётся на выбранной мужской или женской модели — загружать своё фото не требуется.</p>
+  </section>
 
   <!-- ШАГ 1 -->
   <div class="card" id="card1">
@@ -146,6 +242,7 @@
     <a href="/politika" target="_blank">Конфиденциальность</a>·
     <a href="/kontakty" target="_blank">Контакты</a>
   </div>
+  </main>
 </div>
 
 <script>
@@ -164,6 +261,8 @@ const $ = id => document.getElementById(id);
 fetch('/api/config').then(r=>r.json()).then(cfg=>{
   CONFIG = Object.assign(CONFIG, cfg);
   $('payBtn').textContent = `Оплатить и примерить — ${CONFIG.price} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
+  $('heroPrice').textContent = CONFIG.price;
+  $('heroCtaPrice').textContent = CONFIG.price;
   if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
   renderMannequins();
   // Если вернулись с оплаты — сразу открыть шаг примерки

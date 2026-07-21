@@ -27,6 +27,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -195,6 +196,7 @@ app.add_middleware(
     CORSMiddleware, allow_origins=[SITE_URL, "*"],
     allow_methods=["*"], allow_headers=["*"],
 )
+app.mount("/assets", StaticFiles(directory=os.path.join(HERE, "assets")), name="assets")
 
 
 def _page(name):
