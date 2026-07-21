@@ -62,6 +62,12 @@ TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
 TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
 
+# Номер счётчика Яндекс Метрики не является секретом и передаётся фронтенду
+# через /api/config. Оставляем только цифры, чтобы исключить ошибочную вставку.
+YANDEX_METRIKA_ID = "".join(
+    c for c in os.getenv("YANDEX_METRIKA_ID", "110910242") if c.isdigit()
+)
+
 if _YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
     Configuration.account_id = YOOKASSA_SHOP_ID
     Configuration.secret_key = YOOKASSA_SECRET_KEY
@@ -269,6 +275,7 @@ def config():
         "mannequins": available_mannequins(),
         "minItems": 2,
         "maxItems": 6,
+        "metrikaId": YANDEX_METRIKA_ID or None,
     }
 
 

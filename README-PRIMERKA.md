@@ -51,6 +51,7 @@
 | `WAVESPEED_API_KEY` | ваш ключ WaveSpeedAI |
 | `WAVESPEED_MODEL` | (необязательно) по умолчанию `wavespeed-ai/ai-virtual-outfit-tryon` |
 | `TRYON_DURATION` | (необязательно) длительность видео в секундах, по умолчанию `5` |
+| `YANDEX_METRIKA_ID` | номер счётчика Яндекс Метрики; по умолчанию `110910242`, можно переопределить |
 
 Примерка включается автоматически, когда задан `WAVESPEED_API_KEY` **и** есть хотя бы один файл `model-*.jpg`.
 

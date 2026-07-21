@@ -172,7 +172,7 @@
     </div>
 
     <a class="hero-cta" id="heroCta" href="#card1">Начать примерку за <span id="heroCtaPrice">99</span> ₽</a>
-    <details class="demo-video">
+    <details class="demo-video" id="demoVideo">
       <summary>Посмотреть короткое видео результата</summary>
       <video controls muted loop playsinline preload="none" poster="assets/after-result.jpg">
         <source src="assets/result-video.mp4" type="video/mp4">
@@ -196,7 +196,7 @@
       <div class="or">ИЛИ</div>
       <button class="ovalbtn gal" onclick="pickGallery()">Загрузить из ГАЛЕРЕИ</button>
     </div>
-    <div class="thumbs" id="thumbs"></div>
+    <div class="thumbs ym-hide-content" id="thumbs"></div>
     <div class="count-note bad" id="countNote">Добавьте минимум одну вещь верх и одну вещь низ.</div>
     <div class="cam-hint">📷 После создания ФОТО появляется галочка ✓ в нижнем правом углу экрана телефона. Не забывайте нажать на эту галочку, иначе вещь на фото не появится в вашем гардеробе.</div>
     <input type="file" id="fileInput" accept="image/*">
@@ -229,7 +229,7 @@
       <div class="spinner"></div>
       <div id="progressText">Готовим…</div>
     </div>
-    <div class="result" id="result" style="display:none;">
+    <div class="result ym-hide-content" id="result" style="display:none;">
       <video id="resultVideo" controls autoplay loop muted playsinline style="display:none;"></video>
       <img id="resultImage" alt="образ" style="width:100%; border-radius:14px; display:none;">
       <a class="dl" id="dlLink" href="#" download="primerka">⬇ Скачать</a>
@@ -248,7 +248,7 @@
 <script>
 /* ---------- Состояние ---------- */
 let CONFIG = {price:'99', currency:'RUB', paymentsEnabled:false, tryonEnabled:false,
-              mannequins:[], minItems:2, maxItems:6};
+              mannequins:[], minItems:2, maxItems:6, metrikaId:null};
 let items = [];            // {id, kind:'top'|'bottom'|'extra', dataUrl}
 let idc = 1;
 let curKind = 'top';
@@ -257,9 +257,56 @@ let currentOrderId = null;
 
 const $ = id => document.getElementById(id);
 
+/* ---------- Яндекс Метрика ---------- */
+const sentGoals = new Set();
+
+function initMetrika(counterId){
+  const id = Number(counterId);
+  if(!Number.isInteger(id) || id <= 0) return;
+  CONFIG.metrikaId = String(id);
+  (function(m,e,t,r,i,k,a){
+    m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+    m[i].l=1*new Date();
+    for(let j=0; j<e.scripts.length; j++){ if(e.scripts[j].src===r) return; }
+    k=e.createElement(t); a=e.getElementsByTagName(t)[0];
+    k.async=1; k.src=r; a.parentNode.insertBefore(k,a);
+  })(window,document,'script','https://mc.yandex.ru/metrika/tag.js?id='+id,'ym');
+  window.ym(id,'init',{
+    ssr:true,
+    clickmap:true,
+    trackLinks:true,
+    accurateTrackBounce:true,
+    webvisor:true,
+    referrer:document.referrer,
+    url:location.href
+  });
+}
+
+function metrikaGoal(target, params={}){
+  const id = Number(CONFIG.metrikaId);
+  if(!Number.isInteger(id) || id <= 0 || typeof window.ym !== 'function') return false;
+  window.ym(id, 'reachGoal', target, Object.assign({analytics_version:'v1'}, params));
+  return true;
+}
+
+function metrikaGoalOnce(target, params={}){
+  if(sentGoals.has(target)) return;
+  if(metrikaGoal(target, params)) sentGoals.add(target);
+}
+
+$('heroCta').addEventListener('click', ()=>metrikaGoalOnce('start_tryon', {placement:'hero'}));
+$('demoVideo').addEventListener('toggle', e=>{
+  if(e.currentTarget.open) metrikaGoalOnce('demo_video_open');
+});
+$('dlLink').addEventListener('click', ()=>{
+  const kind = $('resultImage').style.display==='block' ? 'photo' : 'video';
+  metrikaGoal('result_download', {kind});
+});
+
 /* ---------- Загрузка настроек ---------- */
 fetch('/api/config').then(r=>r.json()).then(cfg=>{
   CONFIG = Object.assign(CONFIG, cfg);
+  initMetrika(CONFIG.metrikaId);
   const displayPrice = String(CONFIG.price).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
   $('payBtn').textContent = `Оплатить и примерить — ${displayPrice} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
   $('heroPrice').textContent = displayPrice;
@@ -284,6 +331,7 @@ function pickGallery(){
 
 function handlePicked(input){
   const f = input.files[0];
+  const source = input.id==='cameraInput' ? 'camera' : 'gallery';
   input.value = '';
   if(!f) return;
   const img = new Image();
@@ -291,6 +339,8 @@ function handlePicked(input){
   rd.onload = ()=>{ img.onload = ()=>{
     const data = downscale(img, 1024);
     items.push({id:idc++, dataUrl:data});
+    metrikaGoalOnce('garment_uploaded', {source, item_count:items.length});
+    if(items.length>=2) metrikaGoalOnce('garments_ready', {item_count:items.length});
     renderThumbs();
   }; img.src = rd.result; };
   rd.readAsDataURL(f);
@@ -336,6 +386,11 @@ async function startPay(){
   $('payErr').textContent='';
   const garments = garmentsForTryon();
   if(CONFIG.paymentsEnabled){
+    metrikaGoal('payment_start', {
+      item_count:items.length,
+      order_price:Number(CONFIG.price),
+      currency:CONFIG.currency
+    });
     $('payBtn').disabled=true; $('payBtn').textContent='Создаём платёж…';
     try{
       // Фото одежды отправляем на сервер сразу — там они сохранятся и будут
@@ -384,6 +439,7 @@ function renderMannequins(){
 }
 function selectMannequin(id){
   selectedMannequin = id;
+  metrikaGoal('model_selected', {model_id:id});
   document.querySelectorAll('.manne').forEach(x=>x.classList.toggle('sel', +x.dataset.id===id));
   $('card4').classList.remove('dim');
   $('photoBtn').disabled = false;
@@ -391,8 +447,29 @@ function selectMannequin(id){
   $('card4').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
+async function confirmRealPayment(orderId){
+  if(!CONFIG.paymentsEnabled) return;
+  for(let attempt=0; attempt<15; attempt++){
+    try{
+      const r = await fetch('/api/order/'+encodeURIComponent(orderId), {cache:'no-store'});
+      if(r.ok){
+        const d = await r.json();
+        if(d.paid){
+          metrikaGoalOnce('purchase', {
+            order_price:Number(CONFIG.price),
+            currency:CONFIG.currency
+          });
+          return;
+        }
+      }
+    }catch(e){}
+    await new Promise(resolve=>setTimeout(resolve, 2000));
+  }
+}
+
 function afterPayment(orderId){
   currentOrderId = orderId;
+  confirmRealPayment(orderId);
   // Шаги 1 и 2 уже пройдены — прячем их, показываем выбор модели.
   $('card1').style.display='none';
   $('card2').style.display='none';
@@ -421,6 +498,7 @@ async function startTryon(kind){
     });
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'tryon'); }
     const d = await r.json();
+    metrikaGoal('generation_start', {kind, model_id:selectedMannequin});
     pollTryon(d.task_id, kind);
   }catch(e){
     $('progress').style.display='none';
@@ -457,6 +535,7 @@ function pollTryon(taskId, kind){
 }
 
 function showResult(url, kind){
+  metrikaGoal('generation_success', {kind, model_id:selectedMannequin});
   $('progress').style.display='none';
   $('result').style.display='block';
   const vid=$('resultVideo'), img=$('resultImage');
