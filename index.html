@@ -151,7 +151,7 @@
   <section class="hero" aria-labelledby="hero-title">
     <div class="eyebrow">Ваши вещи на модели</div>
     <h1 id="hero-title">Посмотрите, как ваши вещи выглядят на модели</h1>
-    <p class="hero-lead">Загрузите фото <strong>верха и низа</strong> — получите готовый образ за 15–30 секунд или короткое видео за 1–2 минуты.</p>
+    <p class="hero-lead">Загрузите фото <strong>верха и низа</strong> — получите готовый образ обычно до минуты или короткое видео обычно за 2–4 минуты.</p>
 
     <div class="hero-demo" aria-label="Пример результата до и после">
       <div class="before-pair">
@@ -222,8 +222,8 @@
   <div class="card dim" id="card4">
     <h2><span class="step-num">4</span> Ваш образ</h2>
     <div class="sub">Выберите, что получить:</div>
-    <button class="btn" id="photoBtn" disabled onclick="startTryon('photo')" style="background:var(--green);">📷 Фото — быстро (~15–30 сек)</button>
-    <button class="btn" id="videoBtn" disabled onclick="startTryon('video')" style="margin-top:10px;">🎬 Видео — на модели (~1–2 мин)</button>
+    <button class="btn" id="photoBtn" disabled onclick="startTryon('photo')" style="background:var(--green);">📷 Фото — обычно до минуты</button>
+    <button class="btn" id="videoBtn" disabled onclick="startTryon('video')" style="margin-top:10px;">🎬 Видео — обычно 2–4 минуты</button>
     <div class="err" id="tryonErr"></div>
     <div class="progress" id="progress" style="display:none;">
       <div class="spinner"></div>
@@ -488,8 +488,8 @@ async function startTryon(kind){
   $('photoBtn').disabled=true; $('videoBtn').disabled=true;
   $('progress').style.display='block'; $('result').style.display='none';
   $('progressText').textContent = kind==='photo'
-    ? 'Готовим фото… это займёт несколько секунд.'
-    : 'Готовим видео… это займёт минуту-другую.';
+    ? 'Готовим фото… обычно результат появляется в течение минуты.'
+    : 'Готовим видео… обычно результат появляется за 2–4 минуты.';
 
   try{
     const r = await fetch('/api/tryon',{
