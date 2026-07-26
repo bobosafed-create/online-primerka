@@ -54,8 +54,8 @@
             border-radius:16px; padding:15px 18px; color:#fff; background:var(--accent); text-decoration:none;
             text-align:center; font-size:17px; font-weight:850; box-shadow:0 8px 20px rgba(229,57,91,.28);}
   .hero-cta:active{transform:scale(.99);}
-  .demo-video{margin-top:9px; border:1px solid var(--line); border-radius:14px; background:#fff; overflow:hidden;}
-  .demo-video summary{padding:12px 14px; color:var(--accent-dark); font-size:13px; font-weight:800;
+  .demo-video{margin:4px 0 13px; border:1px solid var(--line); border-radius:14px; background:#fff; overflow:hidden;}
+  .demo-video summary{padding:14px 16px; color:var(--accent-dark); font-size:17px; font-weight:800;
                       text-align:center; cursor:pointer; list-style-position:inside;}
   .demo-video video{display:block; width:100%; max-height:500px; background:#000;}
   .trust-list{display:flex; flex-wrap:wrap; justify-content:center; gap:6px 12px; list-style:none;
@@ -171,7 +171,6 @@
       <span class="demo-arrow" aria-hidden="true">→</span>
     </div>
 
-    <a class="hero-cta" id="heroCta" href="#card1">Начать примерку за <span id="heroCtaPrice">99</span> ₽</a>
     <details class="demo-video" id="demoVideo">
       <summary>Посмотреть короткое видео результата</summary>
       <video controls muted loop playsinline preload="none" poster="assets/after-result.jpg">
@@ -179,6 +178,7 @@
         Ваш браузер не поддерживает воспроизведение видео.
       </video>
     </details>
+    <a class="hero-cta" id="heroCta" href="#card1">Давайте попробуем создать ваш идеальный образ</a>
     <ul class="trust-list" aria-label="Преимущества сервиса">
       <li>Работает в браузере</li>
       <li>Без установки</li>
@@ -310,7 +310,6 @@ fetch('/api/config').then(r=>r.json()).then(cfg=>{
   const displayPrice = String(CONFIG.price).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
   $('payBtn').textContent = `Оплатить и примерить — ${displayPrice} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
   $('heroPrice').textContent = displayPrice;
-  $('heroCtaPrice').textContent = displayPrice;
   if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
   renderMannequins();
   // Если вернулись с оплаты — сразу открыть шаг примерки
