@@ -92,13 +92,15 @@ def init_db():
                     is_test    INTEGER NOT NULL DEFAULT 0,
                     payment_id TEXT,
                     created_at TEXT,
-                    result_token TEXT
+                    result_token TEXT,
+                    visitor_id TEXT
                 )"""
             )
-            try:
-                conn.execute("ALTER TABLE orders ADD COLUMN result_token TEXT")
-            except Exception:
-                pass
+            for col in ("result_token", "visitor_id"):
+                try:
+                    conn.execute(f"ALTER TABLE orders ADD COLUMN {col} TEXT")
+                except Exception:
+                    pass
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS settings(
                     key TEXT PRIMARY KEY, value TEXT
@@ -225,6 +227,36 @@ def _mark_result_paid(token):
     if meta and not meta.get("paid"):
         meta["paid"] = True
         _save_result_meta(token, meta)
+
+
+# Данные для ПОВТОРНОГО (платного) образа: одежда + модель, привязанные к заказу.
+def _order_gen_path(order_id):
+    return os.path.join(IMG_DIR, f"ordergen_{order_id}.json")
+
+
+def _store_order_gen(order_id, clothes, mannequin):
+    try:
+        with open(_order_gen_path(order_id), "w") as f:
+            json.dump({"clothes": clothes, "mannequin": mannequin}, f)
+    except Exception as e:
+        print("store order gen warn:", e)
+
+
+def _load_order_gen(order_id):
+    try:
+        with open(_order_gen_path(order_id)) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _set_order_result_token(order_id, token):
+    try:
+        with closing(db()) as conn:
+            conn.execute("UPDATE orders SET result_token=? WHERE order_id=?", (token, order_id))
+            conn.commit()
+    except Exception as e:
+        print("set order token warn:", e)
 
 
 def _download_to(url, path):
@@ -381,6 +413,17 @@ def model_video(n: int):
     raise HTTPException(404, "видео манекена не найдено")
 
 
+@app.get("/assets/{fname}")
+def asset_file(fname: str):
+    """Отдаёт файлы-примеры для главного экрана из папки assets/ рядом с main.py
+    (before-top.jpg, before-bottom.jpg, after-result.jpg, result-video.mp4 и т.п.)."""
+    safe = os.path.basename(fname)            # защита от выхода за пределы папки
+    p = os.path.join(HERE, "assets", safe)
+    if os.path.exists(p):
+        return FileResponse(p)
+    raise HTTPException(404, "файл не найден")
+
+
 @app.get("/api/img/{token}")
 def serve_img(token: str):
     """Публичная ссылка на загруженное фото одежды — нужна, чтобы WaveSpeedAI
@@ -408,8 +451,9 @@ def config():
 # ------------------------------------------------------------------ Оплата ----
 class CreatePaymentIn(BaseModel):
     itemCount: int = 0
-    garments: List[str] = []      # dataURL фото одежды — сохраняем на сервере
+    garments: List[str] = []      # dataURL фото одежды (для повторного платного образа)
     token: str = ""               # результат (превью), который разблокируем в HD
+    mannequin: int = 1            # модель для повторного платного образа
 
 
 @app.post("/api/create-payment")
@@ -427,9 +471,13 @@ def create_payment(data: CreatePaymentIn):
         )
         conn.commit()
 
-    # Фото одежды дублируем на сервере (на случай оплаты первым способом).
-    if data.garments:
-        _store_garments(order_id, data.garments)
+    # Если это ПОВТОРНЫЙ образ (без готового превью) — сохраняем одежду и модель,
+    # чтобы после оплаты сразу сгенерировать чистый результат.
+    if not token and data.garments:
+        clothes = _save_garment_urls(data.garments)
+        mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
+            available_mannequins()[0]["id"] if available_mannequins() else 1)
+        _store_order_gen(order_id, clothes, mannequin)
 
     payment = Payment.create(
         {
@@ -471,7 +519,8 @@ def order_status(order_id: str):
     order = get_order(order_id)
     if not order:
         raise HTTPException(404, "Заказ не найден")
-    return {"paid": bool(verify_and_mark(order))}
+    paid = bool(verify_and_mark(order))
+    return {"paid": paid, "token": order.get("result_token")}
 
 
 # --------------------------------------------------------------- Примерка -----
@@ -768,10 +817,70 @@ def make_video(data: MakeVideoIn):
     return {"task_id": task_id}
 
 
+# ----------- ПОВТОРНЫЙ образ: оплата вперёд → генерация чистого результата -----
+def _run_paid_photo(task_id, token, order_id, mannequin, clothes_urls):
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
+    try:
+        portrait = f"{SITE_URL}/model/{mannequin}"
+        clothes = [u for u in (clothes_urls or []) if u][:8]
+        if not clothes:
+            raise RuntimeError("нет изображений одежды")
+        pred_id, poll_url = _wavespeed_create(portrait, clothes, WAVESPEED_PHOTO_MODEL, False)
+        if not poll_url:
+            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
+        for _ in range(40):
+            time.sleep(3)
+            status, url = _wavespeed_poll(poll_url)
+            if status in ("completed", "succeeded", "success") and url:
+                hd_path = _result_file(token, "hd.jpg")
+                _download_to(url, hd_path)          # платный образ — сразу чистый, без знака
+                _save_result_meta(token, {"kind": "photo", "paid": True,
+                                          "mannequin": mannequin, "clothes": clothes,
+                                          "created_at": now_iso()})
+                _set_order_result_token(order_id, token)
+                TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
+                                  "error": None, "hdUrl": f"/api/result/{token}/hd"}
+                return
+            if status in ("failed", "error", "canceled"):
+                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
+        raise RuntimeError("превышено время ожидания результата")
+    except Exception as e:
+        TASKS[task_id] = {"status": "error", "token": token, "kind": "photo", "error": str(e)}
+
+
+class PaidGenIn(BaseModel):
+    order_id: str
+
+
+@app.post("/api/paid-generate")
+def paid_generate(data: PaidGenIn):
+    order = get_order(data.order_id)
+    if not order:
+        raise HTTPException(404, "Заказ не найден")
+    if not (order["is_test"] or verify_and_mark(order)):
+        raise HTTPException(402, "Оплата не найдена или ещё не подтверждена")
+    if order.get("result_token"):
+        return {"token": order["result_token"], "ready": True}
+    if not tryon_enabled():
+        raise HTTPException(503, "Примерка не настроена")
+    gen = _load_order_gen(data.order_id)
+    if not gen or not gen.get("clothes"):
+        raise HTTPException(400, "Нет данных для создания образа")
+    token = uuid.uuid4().hex
+    task_id = uuid.uuid4().hex
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
+    threading.Thread(target=_run_paid_photo,
+                     args=(task_id, token, data.order_id, gen.get("mannequin", 1), gen["clothes"]),
+                     daemon=True).start()
+    return {"task_id": task_id, "token": token}
+
+
 # ------------------------------------------------------------- Тест-заказ -----
 class TestOrderIn(BaseModel):
     itemCount: int = 0
     token: str = ""
+    mannequin: int = 1
+    garments: List[str] = []
 
 
 @app.post("/api/test-order")
@@ -789,7 +898,12 @@ def test_order(data: TestOrderIn):
         )
         conn.commit()
     if token:
-        _mark_result_paid(token)
+        _mark_result_paid(token)                       # freemium: разблокировать превью
+    elif data.garments:                                # повторный платный образ
+        clothes = _save_garment_urls(data.garments)
+        mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
+            available_mannequins()[0]["id"] if available_mannequins() else 1)
+        _store_order_gen(order_id, clothes, mannequin)
     return {"ok": True, "order_id": order_id}
 
 
