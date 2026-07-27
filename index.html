@@ -96,6 +96,12 @@
   .count-note.bad{color:var(--muted);}
   .cam-hint{margin-top:10px; font-size:13px; line-height:1.45; color:#8a5a00;
             background:#fff5e0; border:1px solid #ffe1a8; border-radius:10px; padding:10px 12px;}
+  .guarantee{margin-top:14px; text-align:center; font-size:15.5px; line-height:1.5; font-weight:700;
+             color:#1f7a44; background:#eafaf0; border:1px solid #bfe9cf; border-radius:12px; padding:14px 16px;}
+  .guarantee b{color:#166534;}
+  .preview-note{margin-top:10px; text-align:center; font-size:13px; color:var(--muted);}
+  .paywall{margin-top:16px; padding-top:14px; border-top:1px dashed var(--line);}
+  .paywall-note{margin-top:9px; text-align:center; font-size:13px; line-height:1.5; color:var(--muted);}
 
   .btn{display:block; width:100%; border:none; border-radius:14px; padding:16px;
        font-size:17px; font-weight:800; color:#fff; background:var(--accent); cursor:pointer;
@@ -205,35 +211,48 @@
 
   <!-- ШАГ 2 -->
   <div class="card dim" id="card2">
-    <h2><span class="step-num">2</span> Оплата <span id="testBadge" class="badge" style="display:none;">тест</span></h2>
-    <div class="sub">Оплата через ЮKassa. Фото образа и видео-примерка откроются сразу после оплаты. Фото и видео доступны для сохранения и скачивания.</div>
-    <button class="btn" id="payBtn" disabled onclick="startPay()">Оплатить и примерить</button>
-    <div class="err" id="payErr"></div>
-  </div>
-
-  <!-- ШАГ 3 -->
-  <div class="card dim" id="card3">
-    <h2><span class="step-num">3</span> Выберите модель</h2>
+    <h2><span class="step-num">2</span> Выберите модель <span id="testBadge" class="badge" style="display:none;">тест</span></h2>
     <div class="sub">Одежда «наденется» на выбранную модель.</div>
     <div class="manne-grid" id="manneGrid"></div>
   </div>
 
-  <!-- ШАГ 4 -->
-  <div class="card dim" id="card4">
-    <h2><span class="step-num">4</span> Ваш образ</h2>
-    <div class="sub">Выберите, что получить:</div>
-    <button class="btn" id="photoBtn" disabled onclick="startTryon('photo')" style="background:var(--green);">📷 Фото — обычно до минуты</button>
-    <button class="btn" id="videoBtn" disabled onclick="startTryon('video')" style="margin-top:10px;">🎬 Видео — обычно 2–4 минуты</button>
-    <div class="err" id="tryonErr"></div>
-    <div class="progress" id="progress" style="display:none;">
+  <!-- ШАГ 3 -->
+  <div class="card dim" id="card3">
+    <h2><span class="step-num">3</span> Бесплатное фото</h2>
+    <div class="sub">Создайте бесплатное превью — фото вашего образа на модели (с водяным знаком).</div>
+    <button class="btn" id="freeBtn" disabled onclick="startFreePhoto()" style="background:var(--green);">✨ Создать бесплатное фото</button>
+    <div class="err" id="freeErr"></div>
+    <div class="progress" id="freeProgress" style="display:none;">
       <div class="spinner"></div>
-      <div id="progressText">Готовим…</div>
+      <div id="freeProgressText">Готовим фото…</div>
     </div>
-    <div class="result ym-hide-content" id="result" style="display:none;">
-      <video id="resultVideo" controls autoplay loop muted playsinline style="display:none;"></video>
-      <img id="resultImage" alt="образ" style="width:100%; border-radius:14px; display:none;">
-      <a class="dl" id="dlLink" href="#" download="primerka">⬇ Скачать</a>
-      <div class="look-thumbs" id="lookThumbs"></div>
+    <div class="result ym-hide-content" id="previewResult" style="display:none;">
+      <img id="previewImg" alt="превью образа" style="width:100%; border-radius:14px; display:block;">
+      <div class="preview-note">Это бесплатное превью с водяным знаком.</div>
+      <div class="paywall">
+        <button class="btn" id="buyBtn" onclick="startPay()">🔓 Скачать в HD без водяного знака — <span id="buyPrice">99</span> ₽</button>
+        <div class="paywall-note">После оплаты откроется чистое фото в HD <b>и</b> видео-образ — их можно сохранить и скачать.</div>
+        <div class="guarantee">🛡️ <b>Сначала бесплатное превью</b> — вы платите только за результат, который уже видели.</div>
+        <div class="err" id="payErr"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ШАГ 4 (после оплаты) -->
+  <div class="card" id="card4" style="display:none;">
+    <h2><span class="step-num">✓</span> Ваш HD-образ</h2>
+    <div class="sub">Фото без водяного знака готово. Можно скачать его и создать видео-образ.</div>
+    <img id="hdImg" alt="HD образ" style="width:100%; border-radius:14px; display:none;">
+    <a class="btn" id="hdDownload" href="#" style="display:block; text-align:center; margin-top:12px; text-decoration:none;">⬇ Скачать фото в HD</a>
+    <button class="btn" id="videoBtn" onclick="makeVideo()" style="margin-top:10px;">🎬 Создать видео-образ (~2–4 мин)</button>
+    <div class="err" id="videoErr"></div>
+    <div class="progress" id="videoProgress" style="display:none;">
+      <div class="spinner"></div>
+      <div id="videoProgressText">Готовим видео…</div>
+    </div>
+    <div class="result" id="videoResult" style="display:none;">
+      <video id="resultVideo" controls autoplay loop muted playsinline style="width:100%;border-radius:14px;background:#000;"></video>
+      <a class="dl" id="videoDownload" href="#" download="primerka.mp4">⬇ Скачать видео</a>
     </div>
   </div>
 
@@ -298,23 +317,22 @@ $('heroCta').addEventListener('click', ()=>metrikaGoalOnce('start_tryon', {place
 $('demoVideo').addEventListener('toggle', e=>{
   if(e.currentTarget.open) metrikaGoalOnce('demo_video_open');
 });
-$('dlLink').addEventListener('click', ()=>{
-  const kind = $('resultImage').style.display==='block' ? 'photo' : 'video';
-  metrikaGoal('result_download', {kind});
-});
 
 /* ---------- Загрузка настроек ---------- */
 fetch('/api/config').then(r=>r.json()).then(cfg=>{
   CONFIG = Object.assign(CONFIG, cfg);
   initMetrika(CONFIG.metrikaId);
   const displayPrice = String(CONFIG.price).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
-  $('payBtn').textContent = `Оплатить и примерить — ${displayPrice} ${CONFIG.currency==='RUB'?'₽':CONFIG.currency}`;
+  CONFIG.priceDisplay = displayPrice;
   $('heroPrice').textContent = displayPrice;
+  $('buyPrice').textContent = displayPrice;
   if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
   renderMannequins();
-  // Если вернулись с оплаты — сразу открыть шаг примерки
-  const oid = new URLSearchParams(location.search).get('order_id');
-  if(oid){ afterPayment(oid); }
+  // Если вернулись с оплаты — сразу открыть HD-результат
+  const params = new URLSearchParams(location.search);
+  const oid = params.get('order_id');
+  const tok = params.get('token');
+  if(oid){ afterPayment(oid, tok); }
 }).catch(()=>{});
 
 /* ---------- Шаг 1: загрузка ---------- */
@@ -370,58 +388,41 @@ function removeItem(id){ items = items.filter(i=>i.id!==id); renderThumbs(); }
 function updateStep1(){
   const ok = items.length >= 2;   // минимум одна вещь верх и одна низ
   const note = $('countNote');
-  if(ok){ note.className='count-note ok'; note.textContent = `Добавлено вещей: ${items.length}. Можно оплачивать.`; }
+  if(ok){ note.className='count-note ok'; note.textContent = `Добавлено вещей: ${items.length}. Выберите модель ниже.`; }
   else{ note.className='count-note bad'; note.textContent = 'Добавьте минимум одну вещь верх и одну вещь низ.'; }
   $('card2').classList.toggle('dim', !ok);
-  $('payBtn').disabled = !ok;
 }
 
-/* ---------- Шаг 2: оплата ---------- */
+/* ---------- Утилиты ---------- */
 function garmentsForTryon(){
   return items.map(i=>i.dataUrl).slice(0, MAX_ITEMS);
 }
-
-async function startPay(){
-  $('payErr').textContent='';
-  const garments = garmentsForTryon();
-  if(CONFIG.paymentsEnabled){
-    metrikaGoal('payment_start', {
-      item_count:items.length,
-      order_price:Number(CONFIG.price),
-      currency:CONFIG.currency
-    });
-    $('payBtn').disabled=true; $('payBtn').textContent='Создаём платёж…';
-    try{
-      // Фото одежды отправляем на сервер сразу — там они сохранятся и будут
-      // доступны для примерки после возврата с оплаты (СБП), в любой вкладке.
-      const r = await fetch('/api/create-payment',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({itemCount: items.length, garments})
-      });
-      if(!r.ok) throw new Error('create-payment');
-      const d = await r.json();
-      // Дублируем в localStorage (переживает переход между вкладками на телефоне)
-      try{ localStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
-      location.href = d.confirmation_url;
-    }catch(e){
-      $('payErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
-      $('payBtn').disabled=false; $('payBtn').textContent=`Оплатить и примерить — ${CONFIG.price} ₽`;
-    }
-  } else {
-    // Тестовый режим: создаём тестовый заказ и сразу переходим к примерке
-    try{
-      const r = await fetch('/api/test-order',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({itemCount: items.length})
-      });
-      const d = await r.json();
-      try{ localStorage.setItem('primerka_g_'+d.order_id, JSON.stringify(garments)); }catch(e){}
-      afterPayment(d.order_id);
-    }catch(e){ $('payErr').textContent='Тестовый режим недоступен.'; }
+// visitorId — чтобы ограничить «1 бесплатное превью» на посетителя
+function visitorId(){
+  let v=null;
+  try{ v = localStorage.getItem('primerka_visitor'); }catch(e){}
+  if(!v){
+    v = Date.now().toString(36) + Math.random().toString(36).slice(2,10);
+    try{ localStorage.setItem('primerka_visitor', v); }catch(e){}
   }
+  return v;
+}
+// Универсальный опрос задачи генерации
+function pollTask(taskId, maxTicks, onDone, onError){
+  let n=0;
+  const iv = setInterval(async ()=>{
+    n++;
+    try{
+      const r = await fetch('/api/tryon/'+taskId, {cache:'no-store'});
+      const d = await r.json();
+      if(d.status==='done'){ clearInterval(iv); onDone(d); return; }
+      if(d.status==='error'){ clearInterval(iv); onError(d.error||'ошибка сервиса'); return; }
+    }catch(e){}
+    if(n>maxTicks){ clearInterval(iv); onError('превышено время ожидания'); }
+  }, 3000);
 }
 
-/* ---------- Шаг 3: манекены + примерка ---------- */
+/* ---------- Шаг 2: выбор модели ---------- */
 function renderMannequins(){
   const grid = $('manneGrid'); grid.innerHTML='';
   const list = CONFIG.mannequins && CONFIG.mannequins.length ? CONFIG.mannequins
@@ -440,118 +441,151 @@ function selectMannequin(id){
   selectedMannequin = id;
   metrikaGoal('model_selected', {model_id:id});
   document.querySelectorAll('.manne').forEach(x=>x.classList.toggle('sel', +x.dataset.id===id));
-  $('card4').classList.remove('dim');
-  $('photoBtn').disabled = false;
-  $('videoBtn').disabled = false;
-  $('card4').scrollIntoView({behavior:'smooth', block:'start'});
-}
-
-async function confirmRealPayment(orderId){
-  if(!CONFIG.paymentsEnabled) return;
-  for(let attempt=0; attempt<15; attempt++){
-    try{
-      const r = await fetch('/api/order/'+encodeURIComponent(orderId), {cache:'no-store'});
-      if(r.ok){
-        const d = await r.json();
-        if(d.paid){
-          metrikaGoalOnce('purchase', {
-            order_price:Number(CONFIG.price),
-            currency:CONFIG.currency
-          });
-          return;
-        }
-      }
-    }catch(e){}
-    await new Promise(resolve=>setTimeout(resolve, 2000));
-  }
-}
-
-function afterPayment(orderId){
-  currentOrderId = orderId;
-  confirmRealPayment(orderId);
-  // Шаги 1 и 2 уже пройдены — прячем их, показываем выбор модели.
-  $('card1').style.display='none';
-  $('card2').style.display='none';
   $('card3').classList.remove('dim');
+  $('freeBtn').disabled = false;
   $('card3').scrollIntoView({behavior:'smooth', block:'start'});
 }
 
-async function startTryon(kind){
-  $('tryonErr').textContent='';
-  if(!selectedMannequin){ $('tryonErr').textContent='Выберите модель.'; return; }
-  // Фото одежды уже сохранены на сервере при оплате. Локальную копию отправим
-  // как запасной вариант (для тестового режима).
-  let garments=[];
-  try{ garments = JSON.parse(localStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){}
+/* ---------- Шаг 3: бесплатное фото с водяным знаком ---------- */
+let currentToken = null;
 
-  $('photoBtn').disabled=true; $('videoBtn').disabled=true;
-  $('progress').style.display='block'; $('result').style.display='none';
-  $('progressText').textContent = kind==='photo'
-    ? 'Готовим фото… обычно результат появляется в течение минуты.'
-    : 'Готовим видео… обычно результат появляется за 2–4 минуты.';
-
+async function startFreePhoto(){
+  $('freeErr').textContent='';
+  if(!selectedMannequin){ $('freeErr').textContent='Выберите модель.'; return; }
+  if(items.length<2){ $('freeErr').textContent='Добавьте минимум одну вещь верх и одну вещь низ.'; return; }
+  const garments = garmentsForTryon();
+  $('freeBtn').disabled=true;
+  $('freeProgress').style.display='block'; $('previewResult').style.display='none';
+  $('freeProgressText').textContent='Готовим фото… обычно результат появляется в течение минуты.';
+  metrikaGoal('free_photo_start', {model_id:selectedMannequin});
   try{
-    const r = await fetch('/api/tryon',{
+    const r = await fetch('/api/free-photo',{
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({order_id: currentOrderId, mannequin: selectedMannequin, kind, garments})
+      body: JSON.stringify({mannequin:selectedMannequin, garments, visitorId:visitorId()})
     });
-    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'tryon'); }
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
     const d = await r.json();
-    metrikaGoal('generation_start', {kind, model_id:selectedMannequin});
-    pollTryon(d.task_id, kind);
+    currentToken = d.token;
+    pollTask(d.task_id, 40, (res)=>{
+      $('freeProgress').style.display='none';
+      $('previewImg').src = res.previewUrl || ('/api/result/'+currentToken+'/preview');
+      $('previewResult').style.display='block';
+      $('buyBtn').disabled=false;
+      metrikaGoalOnce('free_photo_success');
+      $('previewResult').scrollIntoView({behavior:'smooth', block:'start'});
+    }, (err)=>{
+      $('freeProgress').style.display='none';
+      $('freeErr').textContent = 'Не удалось создать фото: '+err;
+      $('freeBtn').disabled=false;
+    });
   }catch(e){
-    $('progress').style.display='none';
-    $('tryonErr').textContent = 'Не удалось запустить примерку: '+(e.message||'ошибка');
-    $('photoBtn').disabled=false; $('videoBtn').disabled=false;
+    $('freeProgress').style.display='none';
+    $('freeErr').textContent = String(e.message||'ошибка');
+    $('freeBtn').disabled=false;
   }
 }
 
-function pollTryon(taskId, kind){
-  let n=0;
-  const label = kind==='photo' ? 'фото' : 'видео';
-  const iv = setInterval(async ()=>{
-    n++;
+/* ---------- Оплата (разблокировка HD + видео) ---------- */
+async function startPay(){
+  $('payErr').textContent='';
+  if(!currentToken){ $('payErr').textContent='Сначала создайте бесплатное фото.'; return; }
+  const priceTxt = CONFIG.priceDisplay || '99';
+  if(CONFIG.paymentsEnabled){
+    metrikaGoal('payment_start', {order_price:Number(CONFIG.price), currency:CONFIG.currency});
+    $('buyBtn').disabled=true; $('buyBtn').textContent='Создаём платёж…';
     try{
-      const r = await fetch('/api/tryon/'+taskId, {cache:'no-store'});
+      const r = await fetch('/api/create-payment',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({itemCount: items.length, token: currentToken})
+      });
+      if(!r.ok) throw new Error('create-payment');
       const d = await r.json();
-      if(d.status==='done' && d.url){
-        clearInterval(iv);
-        showResult(d.url, d.kind || kind);
-        $('photoBtn').disabled=false; $('videoBtn').disabled=false;
-      } else if(d.status==='error'){
-        clearInterval(iv);
-        $('progress').style.display='none';
-        $('tryonErr').textContent = 'Примерка не удалась: '+(d.error||'ошибка сервиса');
-        $('photoBtn').disabled=false; $('videoBtn').disabled=false;
-      } else {
-        $('progressText').textContent = `Готовим ${label}… (${n*3} сек)`;
-      }
-    }catch(e){}
-    if(n>100){ clearInterval(iv); $('progress').style.display='none';
-      $('tryonErr').textContent='Превышено время ожидания. Попробуйте ещё раз.';
-      $('photoBtn').disabled=false; $('videoBtn').disabled=false; }
-  }, 3000);
+      try{ localStorage.setItem('primerka_token_'+d.order_id, currentToken); }catch(e){}
+      location.href = d.confirmation_url;
+    }catch(e){
+      $('payErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
+      $('buyBtn').disabled=false;
+      $('buyBtn').innerHTML=`🔓 Скачать в HD без водяного знака — ${priceTxt} ₽`;
+    }
+  } else {
+    try{
+      const r = await fetch('/api/test-order',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({itemCount: items.length, token: currentToken})
+      });
+      const d = await r.json();
+      afterPayment(d.order_id, currentToken);
+    }catch(e){ $('payErr').textContent='Тестовый режим недоступен.'; }
+  }
 }
 
-function showResult(url, kind){
-  metrikaGoal('generation_success', {kind, model_id:selectedMannequin});
-  $('progress').style.display='none';
-  $('result').style.display='block';
-  const vid=$('resultVideo'), img=$('resultImage');
-  if(kind==='photo'){
-    vid.style.display='none'; vid.removeAttribute('src');
-    img.style.display='block'; img.src=url;
-    $('dlLink').setAttribute('download','primerka.jpg');
-  } else {
-    img.style.display='none'; img.removeAttribute('src');
-    vid.style.display='block'; vid.src=url;
-    $('dlLink').setAttribute('download','primerka.mp4');
+async function confirmRealPayment(orderId){
+  if(!CONFIG.paymentsEnabled) return true;
+  for(let attempt=0; attempt<15; attempt++){
+    try{
+      const r = await fetch('/api/order/'+encodeURIComponent(orderId), {cache:'no-store'});
+      if(r.ok){ const d = await r.json(); if(d.paid){
+        metrikaGoalOnce('purchase', {order_price:Number(CONFIG.price), currency:CONFIG.currency});
+        return true; } }
+    }catch(e){}
+    await new Promise(res=>setTimeout(res, 2000));
   }
-  $('dlLink').href = url;
-  const lt = $('lookThumbs'); lt.innerHTML='';
-  let thumbs = garmentsForTryon();
-  if(!thumbs.length){ try{ thumbs = JSON.parse(localStorage.getItem('primerka_g_'+currentOrderId)||'[]'); }catch(e){} }
-  thumbs.forEach(u=>{ const t=document.createElement('img'); t.src=u; lt.appendChild(t); });
+  return false;
+}
+
+async function afterPayment(orderId, token){
+  currentOrderId = orderId;
+  if(token){ currentToken = token; }
+  if(!currentToken){ try{ currentToken = localStorage.getItem('primerka_token_'+orderId); }catch(e){} }
+  // Прячем шаги загрузки/модели/превью, показываем HD-результат
+  $('card1').style.display='none';
+  $('card2').style.display='none';
+  $('card3').style.display='none';
+  $('card4').style.display='block';
+  $('card4').scrollIntoView({behavior:'smooth', block:'start'});
+  const ok = await confirmRealPayment(orderId);
+  if(!ok){ $('videoErr').textContent='Оплата ещё не подтверждена. Обновите страницу через минуту.'; return; }
+  if(currentToken){
+    const hd = '/api/result/'+currentToken+'/hd';
+    $('hdImg').src = hd; $('hdImg').style.display='block';
+    $('hdDownload').href = hd;
+  }
+}
+
+/* ---------- Видео после оплаты ---------- */
+async function makeVideo(){
+  $('videoErr').textContent='';
+  if(!currentToken){ $('videoErr').textContent='Нет образа.'; return; }
+  $('videoBtn').disabled=true;
+  $('videoProgress').style.display='block'; $('videoResult').style.display='none';
+  $('videoProgressText').textContent='Готовим видео… обычно результат появляется за 2–4 минуты.';
+  metrikaGoal('video_start');
+  try{
+    const r = await fetch('/api/make-video',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token: currentToken})
+    });
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
+    const d = await r.json();
+    pollTask(d.task_id, 100, (res)=>{
+      $('videoProgress').style.display='none';
+      if(res.url){
+        $('resultVideo').src = res.url;
+        $('videoDownload').href = res.url;
+        $('videoResult').style.display='block';
+        metrikaGoalOnce('video_success');
+      }
+      $('videoBtn').disabled=false;
+    }, (err)=>{
+      $('videoProgress').style.display='none';
+      $('videoErr').textContent = 'Не удалось создать видео: '+err;
+      $('videoBtn').disabled=false;
+    });
+  }catch(e){
+    $('videoProgress').style.display='none';
+    $('videoErr').textContent = String(e.message||'ошибка');
+    $('videoBtn').disabled=false;
+  }
 }
 </script>
 </body>

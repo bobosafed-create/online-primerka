@@ -27,7 +27,6 @@ import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -51,7 +50,7 @@ ADMIN_TOKEN = uuid.uuid4().hex  # обновляется при каждом з�
 # WaveSpeedAI — примерка. Две модели: быстрая картинка и видео.
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_MODEL = os.getenv("WAVESPEED_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
-# «Видео» — движущийся манекен (обычно 2–4 мин). «Фото» — обычно до минуты.
+# «Видео» — движущийся манекен (~1–2 мин). «Фото» — быстрая картинка (~15–30 сек).
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", WAVESPEED_MODEL).strip()
 WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
@@ -61,12 +60,6 @@ TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
 # управлять длиной ролика, задайте TRYON_SEND_DURATION=1.
 TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
-
-# Номер счётчика Яндекс Метрики не является секретом и передаётся фронтенду
-# через /api/config. Оставляем только цифры, чтобы исключить ошибочную вставку.
-YANDEX_METRIKA_ID = "".join(
-    c for c in os.getenv("YANDEX_METRIKA_ID", "110910242") if c.isdigit()
-)
 
 if _YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
     Configuration.account_id = YOOKASSA_SHOP_ID
@@ -98,12 +91,22 @@ def init_db():
                     amount     TEXT,
                     is_test    INTEGER NOT NULL DEFAULT 0,
                     payment_id TEXT,
-                    created_at TEXT
+                    created_at TEXT,
+                    result_token TEXT
                 )"""
             )
+            try:
+                conn.execute("ALTER TABLE orders ADD COLUMN result_token TEXT")
+            except Exception:
+                pass
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS settings(
                     key TEXT PRIMARY KEY, value TEXT
+                )"""
+            )
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS free_usage(
+                    visitor_id TEXT PRIMARY KEY, created_at TEXT
                 )"""
             )
             conn.commit()
@@ -165,6 +168,131 @@ def set_paid(order_id):
         conn.commit()
 
 
+# ------------------------------------------- Бесплатные превью (лимит) --------
+def has_used_free(visitor_id):
+    if not visitor_id:
+        return False
+    try:
+        with closing(db()) as conn:
+            row = conn.execute("SELECT 1 FROM free_usage WHERE visitor_id=?",
+                               (visitor_id,)).fetchone()
+            return row is not None
+    except Exception:
+        return False
+
+
+def mark_free_used(visitor_id):
+    if not visitor_id:
+        return
+    try:
+        with closing(db()) as conn:
+            conn.execute("INSERT OR IGNORE INTO free_usage(visitor_id, created_at) VALUES(?,?)",
+                         (visitor_id, now_iso()))
+            conn.commit()
+    except Exception as e:
+        print("mark_free_used warn:", e)
+
+
+# --------------------------------------------- Хранение результата -----------
+def _result_meta_path(token):
+    return os.path.join(IMG_DIR, f"result_{token}.json")
+
+
+def _result_file(token, suffix):
+    return os.path.join(IMG_DIR, f"result_{token}_{suffix}")
+
+
+def _save_result_meta(token, meta):
+    try:
+        with open(_result_meta_path(token), "w") as f:
+            json.dump(meta, f)
+    except Exception as e:
+        print("save result meta warn:", e)
+
+
+def _load_result_meta(token):
+    try:
+        with open(_result_meta_path(token)) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _mark_result_paid(token):
+    if not token:
+        return
+    meta = _load_result_meta(token)
+    if meta and not meta.get("paid"):
+        meta["paid"] = True
+        _save_result_meta(token, meta)
+
+
+def _download_to(url, path):
+    r = requests.get(url, timeout=180)
+    r.raise_for_status()
+    with open(path, "wb") as f:
+        f.write(r.content)
+
+
+def add_watermark(src_path, dst_path):
+    """Наносит полупрозрачный диагональный водяной знак «плиткой» — обрезкой не убрать."""
+    from PIL import Image, ImageDraw, ImageFont
+    img = Image.open(src_path).convert("RGBA")
+    W, H = img.size
+    text = "ОНЛАЙН ПРИМЕРКА  •  оплатите HD"
+    fs = max(18, W // 22)
+    font = None
+    for p in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
+        try:
+            font = ImageFont.truetype(p, fs)
+            break
+        except Exception:
+            pass
+    if font is None:
+        font = ImageFont.load_default()
+    tile = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tile)
+    step_y = int(fs * 3.0)
+    step_x = int(fs * 13)
+    y = -H
+    row = 0
+    while y < H * 2:
+        x = -W + (row % 2) * (step_x // 2)
+        while x < W * 2:
+            td.text((x, y), text, font=font, fill=(255, 255, 255, 70))
+            x += step_x
+        y += step_y
+        row += 1
+    tile = tile.rotate(30, expand=False)
+    img = Image.alpha_composite(img, tile)
+    cd = ImageDraw.Draw(img)
+    big = None
+    try:
+        big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", max(30, W // 9))
+    except Exception:
+        big = font
+    bt = "ПРЕВЬЮ"
+    bb = cd.textbbox((0, 0), bt, font=big)
+    tw, th = bb[2] - bb[0], bb[3] - bb[1]
+    cd.text(((W - tw) / 2 - bb[0], (H - th) / 2 - bb[1]), bt, font=big, fill=(255, 255, 255, 120))
+    img.convert("RGB").save(dst_path, "JPEG", quality=88)
+
+
+def _save_garment_urls(garments):
+    urls = []
+    for g in (garments or []):
+        if not g:
+            continue
+        try:
+            urls.append(_save_dataurl(g))
+        except Exception:
+            pass
+        if len(urls) >= 8:
+            break
+    return urls
+
+
 # ---------------------------------------------------------------- Манекены ----
 def mannequin_frame(n):
     """Стоп-кадр манекена (портрет для примерки): model-1.jpg .. model-3.jpg."""
@@ -202,7 +330,6 @@ app.add_middleware(
     CORSMiddleware, allow_origins=[SITE_URL, "*"],
     allow_methods=["*"], allow_headers=["*"],
 )
-app.mount("/assets", StaticFiles(directory=os.path.join(HERE, "assets")), name="assets")
 
 
 def _page(name):
@@ -275,7 +402,6 @@ def config():
         "mannequins": available_mannequins(),
         "minItems": 2,
         "maxItems": 6,
-        "metrikaId": YANDEX_METRIKA_ID or None,
     }
 
 
@@ -283,6 +409,7 @@ def config():
 class CreatePaymentIn(BaseModel):
     itemCount: int = 0
     garments: List[str] = []      # dataURL фото одежды — сохраняем на сервере
+    token: str = ""               # результат (превью), который разблокируем в HD
 
 
 @app.post("/api/create-payment")
@@ -291,25 +418,26 @@ def create_payment(data: CreatePaymentIn):
         raise HTTPException(503, "Платежи не настроены или включён тестовый режим")
     price = effective_price()
     order_id = uuid.uuid4().hex
+    token = (data.token or "").strip()[:64]
     with closing(db()) as conn:
         conn.execute(
-            "INSERT INTO orders(order_id, item_count, paid, amount, is_test, created_at) "
-            "VALUES(?,?,0,?,0,?)",
-            (order_id, int(data.itemCount or 0), price, now_iso()),
+            "INSERT INTO orders(order_id, item_count, paid, amount, is_test, created_at, result_token) "
+            "VALUES(?,?,0,?,0,?,?)",
+            (order_id, int(data.itemCount or 0), price, now_iso(), token or None),
         )
         conn.commit()
 
-    # Сохраняем фото одежды на сервере — чтобы примерка работала после возврата
-    # с оплаты (СБП) независимо от браузера/вкладки, где загружали фото.
-    _store_garments(order_id, data.garments)
+    # Фото одежды дублируем на сервере (на случай оплаты первым способом).
+    if data.garments:
+        _store_garments(order_id, data.garments)
 
     payment = Payment.create(
         {
             "amount": {"value": price, "currency": CURRENCY},
             "capture": True,
             "confirmation": {"type": "redirect",
-                             "return_url": f"{SITE_URL}/?order_id={order_id}"},
-            "description": "Онлайн примерка одежды (видео-образ)",
+                             "return_url": f"{SITE_URL}/?order_id={order_id}&token={token}"},
+            "description": "Онлайн примерка — HD-фото без водяного знака + видео",
             "metadata": {"order_id": order_id},
             # Продавец — самозанятый (НПД): фискальный чек по 54-ФЗ не формируется здесь.
         },
@@ -323,6 +451,7 @@ def create_payment(data: CreatePaymentIn):
 
 def verify_and_mark(order):
     if order["paid"]:
+        _mark_result_paid(order.get("result_token"))
         return True
     if not (payments_ready() and order.get("payment_id")):
         return False
@@ -330,6 +459,7 @@ def verify_and_mark(order):
         p = Payment.find_one(order["payment_id"])
         if getattr(p, "status", None) == "succeeded":
             set_paid(order["order_id"])
+            _mark_result_paid(order.get("result_token"))
             return True
     except Exception:
         return False
@@ -459,7 +589,7 @@ def _run_tryon(task_id, mannequin, clothes_urls, kind):
         pred_id, poll_url = _wavespeed_create(portrait, clothes, model, with_duration)
         if not poll_url:
             raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        # Видео обычно 2–4 мин, картинка — обычно до минуты.
+        # Видео обычно ~60–120 сек, картинка — ~10–30 сек.
         max_polls = 80 if is_video else 30
         for _ in range(max_polls):
             time.sleep(3)
@@ -508,9 +638,140 @@ def tryon_status(task_id: str):
     return t
 
 
+# ============================================================================
+#           FREEMIUM: бесплатное фото с водяным знаком → HD за оплату
+# ============================================================================
+class FreePhotoIn(BaseModel):
+    mannequin: int = 1
+    garments: List[str] = []
+    visitorId: str = ""
+
+
+def _run_free_photo(task_id, token, mannequin, clothes_urls, visitor_id):
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
+    try:
+        portrait = f"{SITE_URL}/model/{mannequin}"
+        clothes = [u for u in (clothes_urls or []) if u][:8]
+        if not clothes:
+            raise RuntimeError("нет изображений одежды")
+        pred_id, poll_url = _wavespeed_create(portrait, clothes, WAVESPEED_PHOTO_MODEL, False)
+        if not poll_url:
+            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
+        for _ in range(40):
+            time.sleep(3)
+            status, url = _wavespeed_poll(poll_url)
+            if status in ("completed", "succeeded", "success") and url:
+                hd_path = _result_file(token, "hd.jpg")
+                _download_to(url, hd_path)                     # чистое фото (спрятано)
+                add_watermark(hd_path, _result_file(token, "wm.jpg"))  # превью с знаком
+                _save_result_meta(token, {"kind": "photo", "paid": False,
+                                          "mannequin": mannequin, "clothes": clothes,
+                                          "created_at": now_iso()})
+                mark_free_used(visitor_id)                     # лимит только при успехе
+                TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
+                                  "error": None, "previewUrl": f"/api/result/{token}/preview"}
+                return
+            if status in ("failed", "error", "canceled"):
+                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
+        raise RuntimeError("превышено время ожидания результата")
+    except Exception as e:
+        TASKS[task_id] = {"status": "error", "token": token, "kind": "photo", "error": str(e)}
+
+
+@app.post("/api/free-photo")
+def free_photo(data: FreePhotoIn):
+    if not tryon_enabled():
+        raise HTTPException(503, "Примерка не настроена (нет ключа WaveSpeed или манекенов)")
+    vid = (data.visitorId or "").strip()[:64]
+    if vid and has_used_free(vid):
+        raise HTTPException(429, "Бесплатное превью уже использовано. Оплатите, чтобы получить результат в HD.")
+    clothes = _save_garment_urls(data.garments)
+    if not clothes:
+        raise HTTPException(400, "Нет фото одежды")
+    mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
+        available_mannequins()[0]["id"] if available_mannequins() else 1)
+    token = uuid.uuid4().hex
+    task_id = uuid.uuid4().hex
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
+    threading.Thread(target=_run_free_photo, args=(task_id, token, mannequin, clothes, vid),
+                     daemon=True).start()
+    return {"task_id": task_id, "token": token}
+
+
+@app.get("/api/result/{token}/preview")
+def result_preview(token: str):
+    safe = "".join(c for c in token if c.isalnum())
+    p = _result_file(safe, "wm.jpg")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="image/jpeg")
+    raise HTTPException(404, "не найдено")
+
+
+@app.get("/api/result/{token}/hd")
+def result_hd(token: str):
+    safe = "".join(c for c in token if c.isalnum())
+    meta = _load_result_meta(safe)
+    if not meta:
+        raise HTTPException(404, "не найдено")
+    if not meta.get("paid"):
+        raise HTTPException(402, "Доступно после оплаты")
+    p = _result_file(safe, "hd.jpg")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="image/jpeg", filename="primerka-hd.jpg")
+    raise HTTPException(404, "не найдено")
+
+
+class MakeVideoIn(BaseModel):
+    token: str
+
+
+def _run_video_paid(task_id, token, mannequin, clothes_urls):
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": "video", "error": None}
+    try:
+        portrait = f"{SITE_URL}/model/{mannequin}"
+        clothes = [u for u in (clothes_urls or []) if u][:8]
+        if not clothes:
+            raise RuntimeError("нет изображений одежды")
+        pred_id, poll_url = _wavespeed_create(portrait, clothes, WAVESPEED_VIDEO_MODEL, TRYON_SEND_DURATION)
+        if not poll_url:
+            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
+        for _ in range(100):
+            time.sleep(3)
+            status, url = _wavespeed_poll(poll_url)
+            if status in ("completed", "succeeded", "success") and url:
+                TASKS[task_id] = {"status": "done", "token": token, "kind": "video",
+                                  "error": None, "url": url}
+                return
+            if status in ("failed", "error", "canceled"):
+                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
+        raise RuntimeError("превышено время ожидания результата")
+    except Exception as e:
+        TASKS[task_id] = {"status": "error", "token": token, "kind": "video", "error": str(e)}
+
+
+@app.post("/api/make-video")
+def make_video(data: MakeVideoIn):
+    safe = "".join(c for c in (data.token or "") if c.isalnum())
+    meta = _load_result_meta(safe)
+    if not meta:
+        raise HTTPException(404, "Результат не найден")
+    if not meta.get("paid"):
+        raise HTTPException(402, "Видео доступно после оплаты")
+    if not tryon_enabled():
+        raise HTTPException(503, "Примерка не настроена")
+    clothes = meta.get("clothes") or []
+    mannequin = meta.get("mannequin", 1)
+    task_id = uuid.uuid4().hex
+    TASKS[task_id] = {"status": "processing", "token": safe, "kind": "video", "error": None}
+    threading.Thread(target=_run_video_paid, args=(task_id, safe, mannequin, clothes),
+                     daemon=True).start()
+    return {"task_id": task_id}
+
+
 # ------------------------------------------------------------- Тест-заказ -----
 class TestOrderIn(BaseModel):
     itemCount: int = 0
+    token: str = ""
 
 
 @app.post("/api/test-order")
@@ -519,13 +780,16 @@ def test_order(data: TestOrderIn):
     if effective_payments_ready():
         raise HTTPException(403, "Недоступно в боевом режиме")
     order_id = uuid.uuid4().hex
+    token = (data.token or "").strip()[:64]
     with closing(db()) as conn:
         conn.execute(
-            "INSERT INTO orders(order_id, item_count, paid, amount, is_test, created_at) "
-            "VALUES(?,?,1,?,1,?)",
-            (order_id, int(data.itemCount or 0), effective_price(), now_iso()),
+            "INSERT INTO orders(order_id, item_count, paid, amount, is_test, created_at, result_token) "
+            "VALUES(?,?,1,?,1,?,?)",
+            (order_id, int(data.itemCount or 0), effective_price(), now_iso(), token or None),
         )
         conn.commit()
+    if token:
+        _mark_result_paid(token)
     return {"ok": True, "order_id": order_id}
 
 
