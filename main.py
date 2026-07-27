@@ -266,48 +266,61 @@ def _download_to(url, path):
         f.write(r.content)
 
 
+def _wm_font(size, bold=True):
+    p = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
+         else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
+    try:
+        from PIL import ImageFont
+        return ImageFont.truetype(p, size)
+    except Exception:
+        from PIL import ImageFont
+        return ImageFont.load_default()
+
+
 def add_watermark(src_path, dst_path):
-    """Наносит полупрозрачный диагональный водяной знак «плиткой» — обрезкой не убрать."""
-    from PIL import Image, ImageDraw, ImageFont
+    """Заметный водяной знак: диагональная «плитка» Online Primerka (обрезкой не убрать)
+    + яркая диагональная полоса ONLINE PRIMERKA. Виден на любом фоне (белая заливка + тёмная обводка)."""
+    from PIL import Image, ImageDraw
     img = Image.open(src_path).convert("RGBA")
     W, H = img.size
-    text = "ОНЛАЙН ПРИМЕРКА  •  оплатите HD"
-    fs = max(18, W // 22)
-    font = None
-    for p in ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-              "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"):
-        try:
-            font = ImageFont.truetype(p, fs)
-            break
-        except Exception:
-            pass
-    if font is None:
-        font = ImageFont.load_default()
+
+    # 1) Плитка по диагонали — защита от обрезки
+    text = "Online Primerka"
+    fs = max(20, W // 20)
+    font = _wm_font(fs)
     tile = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     td = ImageDraw.Draw(tile)
-    step_y = int(fs * 3.0)
-    step_x = int(fs * 13)
+    step_x = int(fs * 11)
+    step_y = int(fs * 3.2)
+    stroke = max(1, fs // 16)
     y = -H
     row = 0
     while y < H * 2:
         x = -W + (row % 2) * (step_x // 2)
         while x < W * 2:
-            td.text((x, y), text, font=font, fill=(255, 255, 255, 70))
+            td.text((x, y), text, font=font, fill=(255, 255, 255, 120),
+                    stroke_width=stroke, stroke_fill=(0, 0, 0, 120))
             x += step_x
         y += step_y
         row += 1
     tile = tile.rotate(30, expand=False)
     img = Image.alpha_composite(img, tile)
-    cd = ImageDraw.Draw(img)
-    big = None
-    try:
-        big = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", max(30, W // 9))
-    except Exception:
-        big = font
-    bt = "ПРЕВЬЮ"
-    bb = cd.textbbox((0, 0), bt, font=big)
+
+    # 2) Центральная диагональная полоса с надписью
+    band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    bd = ImageDraw.Draw(band)
+    bh = int(H * 0.14)
+    bd.rectangle([0, (H - bh) // 2, W, (H + bh) // 2], fill=(229, 57, 91, 125))
+    bfs = max(26, W // 12)
+    bfont = _wm_font(bfs)
+    bt = "ONLINE PRIMERKA"
+    bb = bd.textbbox((0, 0), bt, font=bfont)
     tw, th = bb[2] - bb[0], bb[3] - bb[1]
-    cd.text(((W - tw) / 2 - bb[0], (H - th) / 2 - bb[1]), bt, font=big, fill=(255, 255, 255, 120))
+    bd.text(((W - tw) / 2 - bb[0], (H - th) / 2 - bb[1]), bt, font=bfont,
+            fill=(255, 255, 255, 240), stroke_width=max(1, bfs // 16), stroke_fill=(0, 0, 0, 130))
+    band = band.rotate(30, expand=False)
+    img = Image.alpha_composite(img, band)
+
     img.convert("RGB").save(dst_path, "JPEG", quality=88)
 
 
