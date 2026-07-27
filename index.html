@@ -222,6 +222,11 @@
     <div class="sub">Создайте бесплатное превью — фото вашего образа на модели (с водяным знаком).</div>
     <button class="btn" id="freeBtn" disabled onclick="startFreePhoto()" style="background:var(--green);">✨ Создать бесплатное фото</button>
     <div class="err" id="freeErr"></div>
+    <div id="repeatPay" style="display:none;">
+      <div class="paywall-note" style="margin-top:4px;">Бесплатное превью уже использовано. Создайте ещё один образ — оплатите, и он сформируется сразу (фото в HD + видео).</div>
+      <button class="btn" id="repeatPayBtn" onclick="startPaidGeneration()" style="margin-top:10px;">🔓 Оплатить и создать образ — <span id="repeatPrice">99</span> ₽</button>
+      <div class="err" id="repeatErr"></div>
+    </div>
     <div class="progress" id="freeProgress" style="display:none;">
       <div class="spinner"></div>
       <div id="freeProgressText">Готовим фото…</div>
@@ -245,6 +250,7 @@
     <img id="hdImg" alt="HD образ" style="width:100%; border-radius:14px; display:none;">
     <a class="btn" id="hdDownload" href="#" style="display:block; text-align:center; margin-top:12px; text-decoration:none;">⬇ Скачать фото в HD</a>
     <button class="btn" id="videoBtn" onclick="makeVideo()" style="margin-top:10px;">🎬 Создать видео-образ (~2–4 мин)</button>
+    <button class="btn" id="againBtn" onclick="location.href='/'" style="margin-top:10px; background:#8a8f98;">➕ Создать ещё один образ</button>
     <div class="err" id="videoErr"></div>
     <div class="progress" id="videoProgress" style="display:none;">
       <div class="spinner"></div>
@@ -326,6 +332,7 @@ fetch('/api/config').then(r=>r.json()).then(cfg=>{
   CONFIG.priceDisplay = displayPrice;
   $('heroPrice').textContent = displayPrice;
   $('buyPrice').textContent = displayPrice;
+  $('repeatPrice').textContent = displayPrice;
   if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
   renderMannequins();
   // Если вернулись с оплаты — сразу открыть HD-результат
@@ -463,6 +470,7 @@ async function startFreePhoto(){
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({mannequin:selectedMannequin, garments, visitorId:visitorId()})
     });
+    if(r.status===429){ $('freeProgress').style.display='none'; showRepeatPay(); return; }
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
     const d = await r.json();
     currentToken = d.token;
@@ -533,22 +541,94 @@ async function confirmRealPayment(orderId){
   return false;
 }
 
+/* Повторный образ: сначала показываем кнопку ОПЛАТА */
+function showRepeatPay(){
+  $('freeBtn').style.display='none';
+  $('repeatPay').style.display='block';
+  $('repeatPay').scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function startPaidGeneration(){
+  $('repeatErr').textContent='';
+  if(!selectedMannequin){ $('repeatErr').textContent='Выберите модель.'; return; }
+  if(items.length<2){ $('repeatErr').textContent='Добавьте минимум одну вещь верх и одну вещь низ.'; return; }
+  const garments = garmentsForTryon();
+  const priceTxt = CONFIG.priceDisplay || '99';
+  if(CONFIG.paymentsEnabled){
+    metrikaGoal('payment_start', {order_price:Number(CONFIG.price), currency:CONFIG.currency, repeat:1});
+    $('repeatPayBtn').disabled=true; $('repeatPayBtn').textContent='Создаём платёж…';
+    try{
+      const r = await fetch('/api/create-payment',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({itemCount: items.length, mannequin: selectedMannequin, garments})
+      });
+      if(!r.ok) throw new Error('create-payment');
+      const d = await r.json();
+      location.href = d.confirmation_url;
+    }catch(e){
+      $('repeatErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
+      $('repeatPayBtn').disabled=false; $('repeatPayBtn').innerHTML=`🔓 Оплатить и создать образ — ${priceTxt} ₽`;
+    }
+  } else {
+    try{
+      const r = await fetch('/api/test-order',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({itemCount: items.length, mannequin: selectedMannequin, garments})
+      });
+      const d = await r.json();
+      afterPayment(d.order_id, null);
+    }catch(e){ $('repeatErr').textContent='Тестовый режим недоступен.'; }
+  }
+}
+
+function unlockHd(){
+  if(!currentToken) return;
+  const hd = '/api/result/'+currentToken+'/hd';
+  $('hdImg').src = hd; $('hdImg').style.display='block';
+  $('hdDownload').href = hd;
+  $('videoBtn').disabled = false;
+}
+
 async function afterPayment(orderId, token){
   currentOrderId = orderId;
   if(token){ currentToken = token; }
   if(!currentToken){ try{ currentToken = localStorage.getItem('primerka_token_'+orderId); }catch(e){} }
-  // Прячем шаги загрузки/модели/превью, показываем HD-результат
+  // Прячем шаги загрузки/модели/превью, показываем результат
   $('card1').style.display='none';
   $('card2').style.display='none';
   $('card3').style.display='none';
   $('card4').style.display='block';
+  $('videoBtn').disabled = true;
   $('card4').scrollIntoView({behavior:'smooth', block:'start'});
   const ok = await confirmRealPayment(orderId);
   if(!ok){ $('videoErr').textContent='Оплата ещё не подтверждена. Обновите страницу через минуту.'; return; }
   if(currentToken){
-    const hd = '/api/result/'+currentToken+'/hd';
-    $('hdImg').src = hd; $('hdImg').style.display='block';
-    $('hdDownload').href = hd;
+    unlockHd();                       // первый образ: превью уже готово
+    return;
+  }
+  // Повторный платный образ — генерируем чистый результат сейчас
+  $('videoProgress').style.display='block';
+  $('videoProgressText').textContent='Готовим ваш образ… обычно результат появляется в течение минуты.';
+  try{
+    const r = await fetch('/api/paid-generate',{
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({order_id: orderId})
+    });
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
+    const d = await r.json();
+    if(d.ready && d.token){ currentToken=d.token; $('videoProgress').style.display='none'; unlockHd(); return; }
+    currentToken = d.token || currentToken;
+    pollTask(d.task_id, 40, (res)=>{
+      $('videoProgress').style.display='none';
+      currentToken = res.token || currentToken;
+      unlockHd();
+    }, (err)=>{
+      $('videoProgress').style.display='none';
+      $('videoErr').textContent = 'Не удалось создать образ: '+err;
+    });
+  }catch(e){
+    $('videoProgress').style.display='none';
+    $('videoErr').textContent = String(e.message||'ошибка');
   }
 }
 
