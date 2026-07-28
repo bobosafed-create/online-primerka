@@ -277,15 +277,11 @@ def _wm_font(size, bold=True):
         return ImageFont.load_default()
 
 
-def add_watermark(src_path, dst_path):
-    """Заметный водяной знак: диагональная «плитка» Online Primerka (обрезкой не убрать)
-    + яркая диагональная полоса ONLINE PRIMERKA. Виден на любом фоне (белая заливка + тёмная обводка)."""
+def _watermark_layers(img_rgba):
+    """Наносит на RGBA-изображение диагональную «плитку» Online Primerka (обрезкой не убрать)
+    + яркую полосу ONLINE PRIMERKA. Виден на любом фоне (белый + тёмная обводка). Возвращает новое изображение."""
     from PIL import Image, ImageDraw
-    img = Image.open(src_path).convert("RGBA")
-    W, H = img.size
-
-    # 1) Плитка по диагонали — защита от обрезки
-    text = "Online Primerka"
+    W, H = img_rgba.size
     fs = max(20, W // 20)
     font = _wm_font(fs)
     tile = Image.new("RGBA", (W, H), (0, 0, 0, 0))
@@ -298,15 +294,14 @@ def add_watermark(src_path, dst_path):
     while y < H * 2:
         x = -W + (row % 2) * (step_x // 2)
         while x < W * 2:
-            td.text((x, y), text, font=font, fill=(255, 255, 255, 120),
+            td.text((x, y), "Online Primerka", font=font, fill=(255, 255, 255, 120),
                     stroke_width=stroke, stroke_fill=(0, 0, 0, 120))
             x += step_x
         y += step_y
         row += 1
     tile = tile.rotate(30, expand=False)
-    img = Image.alpha_composite(img, tile)
+    img_rgba = Image.alpha_composite(img_rgba, tile)
 
-    # 2) Центральная диагональная полоса с надписью
     band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     bd = ImageDraw.Draw(band)
     bh = int(H * 0.14)
@@ -319,9 +314,31 @@ def add_watermark(src_path, dst_path):
     bd.text(((W - tw) / 2 - bb[0], (H - th) / 2 - bb[1]), bt, font=bfont,
             fill=(255, 255, 255, 240), stroke_width=max(1, bfs // 16), stroke_fill=(0, 0, 0, 130))
     band = band.rotate(30, expand=False)
-    img = Image.alpha_composite(img, band)
+    return Image.alpha_composite(img_rgba, band)
 
-    img.convert("RGB").save(dst_path, "JPEG", quality=88)
+
+def make_preview(src_path, dst_path):
+    """Превью, которым НЕЛЬЗЯ пользоваться как готовым результатом: сильное размытие
+    («туман») + маленькое чёткое окно-кружок (доказательство качества) + водяной знак."""
+    from PIL import Image, ImageDraw, ImageFilter
+    base = Image.open(src_path).convert("RGB")
+    W, H = base.size
+    # 1) Туман: снижаем детализацию и сильно размываем
+    small = base.resize((max(1, W // 3), max(1, H // 3)))
+    blurred = small.resize((W, H)).filter(ImageFilter.GaussianBlur(radius=max(6, W // 40)))
+    # 2) Чёткое окно-кружок из оригинала (тизер качества)
+    r = int(W * 0.15)
+    cx = W // 2
+    cy = int(H * 0.30)
+    mask = Image.new("L", (W, H), 0)
+    ImageDraw.Draw(mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
+    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, r // 12)))
+    preview = Image.composite(base, blurred, mask)
+    ImageDraw.Draw(preview).ellipse([cx - r, cy - r, cx + r, cy + r],
+                                    outline=(255, 255, 255), width=max(2, W // 180))
+    # 3) Водяной знак поверх
+    preview = _watermark_layers(preview.convert("RGBA"))
+    preview.convert("RGB").save(dst_path, "JPEG", quality=85)
 
 
 def _save_garment_urls(garments):
@@ -725,7 +742,7 @@ def _run_free_photo(task_id, token, mannequin, clothes_urls, visitor_id):
             if status in ("completed", "succeeded", "success") and url:
                 hd_path = _result_file(token, "hd.jpg")
                 _download_to(url, hd_path)                     # чистое фото (спрятано)
-                add_watermark(hd_path, _result_file(token, "wm.jpg"))  # превью с знаком
+                make_preview(hd_path, _result_file(token, "wm.jpg"))  # превью: туман + окно + знак
                 _save_result_meta(token, {"kind": "photo", "paid": False,
                                           "mannequin": mannequin, "clothes": clothes,
                                           "created_at": now_iso()})
