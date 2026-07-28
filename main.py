@@ -278,8 +278,8 @@ def _wm_font(size, bold=True):
 
 
 def _watermark_layers(img_rgba):
-    """Наносит на RGBA-изображение диагональную «плитку» Online Primerka (обрезкой не убрать)
-    + яркую полосу ONLINE PRIMERKA. Виден на любом фоне (белый + тёмная обводка). Возвращает новое изображение."""
+    """Наносит на RGBA-изображение диагональную «плитку» Online Primerka (обрезкой не убрать).
+    Виден на любом фоне (белый + тёмная обводка). Возвращает новое изображение."""
     from PIL import Image, ImageDraw
     W, H = img_rgba.size
     fs = max(20, W // 20)
@@ -294,42 +294,29 @@ def _watermark_layers(img_rgba):
     while y < H * 2:
         x = -W + (row % 2) * (step_x // 2)
         while x < W * 2:
-            td.text((x, y), "Online Primerka", font=font, fill=(255, 255, 255, 120),
-                    stroke_width=stroke, stroke_fill=(0, 0, 0, 120))
+            td.text((x, y), "Online Primerka", font=font, fill=(255, 255, 255, 115),
+                    stroke_width=stroke, stroke_fill=(0, 0, 0, 115))
             x += step_x
         y += step_y
         row += 1
     tile = tile.rotate(30, expand=False)
-    img_rgba = Image.alpha_composite(img_rgba, tile)
-
-    band = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    bd = ImageDraw.Draw(band)
-    bh = int(H * 0.14)
-    bd.rectangle([0, (H - bh) // 2, W, (H + bh) // 2], fill=(229, 57, 91, 125))
-    bfs = max(26, W // 12)
-    bfont = _wm_font(bfs)
-    bt = "ONLINE PRIMERKA"
-    bb = bd.textbbox((0, 0), bt, font=bfont)
-    tw, th = bb[2] - bb[0], bb[3] - bb[1]
-    bd.text(((W - tw) / 2 - bb[0], (H - th) / 2 - bb[1]), bt, font=bfont,
-            fill=(255, 255, 255, 240), stroke_width=max(1, bfs // 16), stroke_fill=(0, 0, 0, 130))
-    band = band.rotate(30, expand=False)
-    return Image.alpha_composite(img_rgba, band)
+    return Image.alpha_composite(img_rgba, tile)
 
 
 def make_preview(src_path, dst_path):
     """Превью, которым НЕЛЬЗЯ пользоваться как готовым результатом: сильное размытие
-    («туман») + маленькое чёткое окно-кружок (доказательство качества) + водяной знак."""
+    («туман») + одно чёткое окно-кружок на линии талии (видно часть верха и часть низа)
+    + водяной знак."""
     from PIL import Image, ImageDraw, ImageFilter
     base = Image.open(src_path).convert("RGB")
     W, H = base.size
     # 1) Туман: снижаем детализацию и сильно размываем
     small = base.resize((max(1, W // 3), max(1, H // 3)))
     blurred = small.resize((W, H)).filter(ImageFilter.GaussianBlur(radius=max(6, W // 40)))
-    # 2) Чёткое окно-кружок из оригинала (тизер качества)
-    r = int(W * 0.15)
+    # 2) Чёткое окно-кружок из оригинала на линии талии (тизер: часть верха + часть низа)
+    r = int(W * 0.17)
     cx = W // 2
-    cy = int(H * 0.30)
+    cy = int(H * 0.53)
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, r // 12)))
