@@ -30,8 +30,11 @@
   .eyebrow:before{content:""; width:7px; height:7px; border-radius:50%; background:var(--accent);}
   .hero h1{max-width:590px; font-family:Georgia,serif; font-size:clamp(29px,8vw,43px); line-height:1.04;
            letter-spacing:-.7px; margin:0 0 10px; color:#251c1f;}
-  .hero-lead{max-width:590px; color:#5f5559; font-size:15px; line-height:1.48; margin:0 0 16px;}
-  .hero-lead strong{color:var(--ink);}
+  .hero-brand{font-family:Georgia,serif; font-weight:700; font-size:22px; letter-spacing:-.4px; margin:0 0 10px;}
+  .hero-brand .s1{color:#1d1d22;}
+  .hero-brand .s2{color:#c05838;}
+  .hero-lead{max-width:590px; color:#a8442a; font-family:Georgia,serif; font-size:19px; line-height:1.35;
+             letter-spacing:-.2px; font-weight:600; margin:0 0 16px;}
 
   .hero-demo{display:grid; grid-template-columns:minmax(0,.82fr) minmax(0,1.18fr); gap:9px;
              align-items:stretch; margin:0 0 15px;}
@@ -156,9 +159,9 @@
 
   <main>
   <section class="hero" aria-labelledby="hero-title">
-    <div class="eyebrow">Ваши вещи на модели</div>
-    <h1 id="hero-title">Посмотрите, как ваши вещи выглядят на модели</h1>
-    <p class="hero-lead">Загрузите фото <strong>верха и низа</strong> — получите готовый образ обычно до минуты или короткое видео обычно за 2–4 минуты.</p>
+    <div class="hero-brand"><span class="s1">Style</span><span class="s2">Globe</span></div>
+    <h1 id="hero-title">Посмотрите свою одежду на модели</h1>
+    <p class="hero-lead">Вещи из вашего гардероба или те, что вы только собираетесь купить. Загрузите фото верха и низа и увидите готовый образ за минуту.</p>
 
     <div class="hero-demo" aria-label="Пример результата до и после">
       <div class="before-pair">
