@@ -17,8 +17,6 @@
   .wrap{max-width:720px; margin:0 auto; padding:12px 14px 60px;}
   .site-header{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:4px 2px 12px;}
   .brand{font-family:Georgia,serif; font-size:20px; font-weight:700; letter-spacing:-.2px;}
-  .launch-price{font-size:12px; color:var(--muted); background:#fff; border:1px solid var(--line);
-                border-radius:999px; padding:7px 10px; white-space:nowrap;}
 
   .hero{position:relative; overflow:hidden; background:linear-gradient(145deg,#fff 0%,#fff8f3 100%);
         border:1px solid #eadfd8; border-radius:24px; padding:20px 16px 16px; margin-bottom:16px;
@@ -154,7 +152,6 @@
 <div class="wrap">
   <header class="site-header">
     <div class="brand">Онлайн примерка</div>
-    <div class="launch-price">Цена запуска — <strong><span id="heroPrice">99</span> ₽</strong></div>
   </header>
 
   <main>
@@ -334,7 +331,6 @@ fetch('/api/config').then(r=>r.json()).then(cfg=>{
   initMetrika(CONFIG.metrikaId);
   const displayPrice = String(CONFIG.price).replace(/\.00$/, '').replace(/(\.\d)0$/, '$1');
   CONFIG.priceDisplay = displayPrice;
-  $('heroPrice').textContent = displayPrice;
   $('buyPrice').textContent = displayPrice;
   $('repeatPrice').textContent = displayPrice;
   if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
