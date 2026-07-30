@@ -150,6 +150,12 @@ def test_mode():
     return (get_setting("test_mode") or "0") == "1"
 
 
+def sample_mode():
+    # Режим-образец: на превью показывается фиксированный образец (без генерации),
+    # реальный образ создаётся после оплаты. Экономит кредиты на непокупателях.
+    return (get_setting("sample_mode") or "0") == "1"
+
+
 def payments_ready():
     return bool(_YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY)
 
@@ -316,7 +322,7 @@ def make_preview(src_path, dst_path):
     # 2) Чёткое окно-кружок из оригинала на линии талии (тизер: часть верха + часть низа)
     r = int(W * 0.17)
     cx = W // 2
-    cy = int(H * 0.53)
+    cy = int(H * 0.47)
     mask = Image.new("L", (W, H), 0)
     ImageDraw.Draw(mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
     mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, r // 12)))
@@ -462,6 +468,7 @@ def config():
         "mannequins": available_mannequins(),
         "minItems": 2,
         "maxItems": 6,
+        "sampleMode": sample_mode(),
     }
 
 
@@ -932,6 +939,7 @@ class AdminLoginIn(BaseModel):
 class SettingsIn(BaseModel):
     price: Optional[str] = None
     test_mode: Optional[bool] = None
+    sample_mode: Optional[bool] = None
 
 
 def require_admin(request: Request):
@@ -975,6 +983,7 @@ def admin_stats(request: Request):
         "currency": CURRENCY,
         "price": effective_price(),
         "testMode": test_mode(),
+        "sampleMode": sample_mode(),
         "paymentsReady": payments_ready(),
         "tryonEnabled": tryon_enabled(),
         "mannequins": len(available_mannequins()),
@@ -998,7 +1007,10 @@ def admin_settings(request: Request, data: SettingsIn):
             raise HTTPException(400, "Некорректная цена")
     if data.test_mode is not None:
         set_setting("test_mode", "1" if data.test_mode else "0")
-    return {"ok": True, "price": effective_price(), "testMode": test_mode()}
+    if data.sample_mode is not None:
+        set_setting("sample_mode", "1" if data.sample_mode else "0")
+    return {"ok": True, "price": effective_price(), "testMode": test_mode(),
+            "sampleMode": sample_mode()}
 
 
 # -------------------------------------------------------------- Вебхук --------

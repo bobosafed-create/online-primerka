@@ -58,6 +58,13 @@
         </select>
       </div>
       <div class="field">
+        <label>Режим-образец (превью без генерации)</label>
+        <select id="sampleMode" style="padding:11px;border-radius:10px;background:#0f1014;color:#fff;border:1px solid #333;">
+          <option value="0">Выключен (превью из вещей клиента)</option>
+          <option value="1">Включён (показывать образец, экономить кредиты)</option>
+        </select>
+      </div>
+      <div class="field">
         <button class="btn" style="width:auto;padding:11px 20px;" onclick="saveSettings()">Сохранить</button>
       </div>
       <div class="field"><span id="saveMsg" class="ok"></span></div>
@@ -104,6 +111,7 @@ async function loadAll(){
   ].map(k=>`<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div></div>`).join('');
   $('price').value = s.price;
   $('testMode').value = s.testMode ? '1':'0';
+  $('sampleMode').value = s.sampleMode ? '1':'0';
   $('tryNote').textContent = `Примерка: ${s.tryonEnabled?'включена':'выключена'} · манекенов: ${s.mannequins} · оплата: ${s.paymentsReady?'подключена':'не подключена'}`;
   const o = await api('/api/admin/orders');
   const tb = document.querySelector('#ordersTable tbody');
@@ -119,7 +127,7 @@ async function saveSettings(){
   $('saveMsg').textContent='';
   const r = await fetch('/api/admin/settings',{method:'POST',
     headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
-    body:JSON.stringify({price:$('price').value, test_mode: $('testMode').value==='1'})});
+    body:JSON.stringify({price:$('price').value, test_mode: $('testMode').value==='1', sample_mode: $('sampleMode').value==='1'})});
   if(r.ok){ $('saveMsg').textContent='Сохранено'; loadAll(); }
   else{ $('saveMsg').textContent='Ошибка'; }
 }
