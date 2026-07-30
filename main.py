@@ -1,16 +1,16 @@
 """
-Онлайн примерка — отдельное приложение.
+StyleGlobe для селлеров — каталожные фото/видео для Wildberries / Ozon.
 
-Поток из 4 шагов:
-  1) Загрузка фото одежды (верх + низ обязательно, максимум 6 предметов верх/низ;
-     дополнительно — головной убор, обувь, аксессуары). Без коррекции цвета/вида.
-  2) Оплата через ЮKassa.
-  3) Онлайн-примерка: клиент выбирает один из трёх ИИ-манекенов, одежда «надевается»
-     на движущийся манекен через видео-примерку WaveSpeedAI (1 образ = 1 видео).
-  4) Выдача образа (видео).
+Модель:
+  1) Селлер загружает фото товара, выбирает модель, жмёт «Бесплатное превью»
+     (1 бесплатное превью на посетителя, с прозрачным водяным знаком).
+  2) Покупает ПАКЕТ генераций (1 / 10 / 25+видео / 50) через ЮKassa.
+  3) После оплаты получает КОД ДОСТУПА с балансом генераций.
+  4) По коду генерирует товары в HD без водяного знака — каждая генерация
+     списывает 1 генерацию с баланса. Баланс хранится в ПОСТОЯННОЙ базе (PostgreSQL).
 
-Ключи и секреты берутся ТОЛЬКО из переменных окружения (в код и в браузер не попадают).
-Рекомендации/видео выдаются сервером лишь после подтверждённой оплаты.
+Идентификация — по коду доступа (без регистрации). Баланс — в БД.
+Секреты только в переменных окружения.
 """
 
 import os
@@ -18,11 +18,11 @@ import json
 import uuid
 import base64
 import time
+import secrets
 import threading
 import tempfile
 from contextlib import closing
 
-import sqlite3
 import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,7 +30,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 from typing import Optional, List
 
-# ЮKassa
 try:
     from yookassa import Configuration, Payment
     _YK = True
@@ -42,76 +41,93 @@ YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID", "").strip()
 YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "").strip()
 SITE_URL = os.getenv("SITE_URL", "https://example.twc1.net").rstrip("/")
 CURRENCY = os.getenv("CURRENCY", "RUB")
-DEFAULT_PRICE = os.getenv("SERVICE_PRICE", "99.00")
-
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
-ADMIN_TOKEN = uuid.uuid4().hex  # обновляется при каждом запуске сервера
+ADMIN_TOKEN = uuid.uuid4().hex
 
-# WaveSpeedAI — примерка. Две модели: быстрая картинка и видео.
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
-WAVESPEED_MODEL = os.getenv("WAVESPEED_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
-# «Видео» — движущийся манекен (~1–2 мин). «Фото» — быстрая картинка (~15–30 сек).
-WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", WAVESPEED_MODEL).strip()
+WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
 WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
 TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
-# По умолчанию поле duration НЕ отправляем (у модели по умолчанию 5 сек) —
-# так тело запроса совпадает с рабочим запросом фото-модели. Если нужно
-# управлять длиной ролика, задайте TRYON_SEND_DURATION=1.
 TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
+
+# Пакеты (цены и число генераций). Менять можно здесь.
+PACKAGES = [
+    {"id": "test",    "title": "1 фото (Тест)",            "count": 1,  "price": "99.00",   "video": False},
+    {"id": "start",   "title": "10 фото (Старт)",          "count": 10, "price": "990.00",  "video": False},
+    {"id": "catalog", "title": "25 фото + видео (Каталог)", "count": 25, "price": "2490.00", "video": True},
+    {"id": "pro",     "title": "50 фото (Профи)",          "count": 50, "price": "3990.00", "video": False},
+]
+PACKAGE_BY_ID = {p["id"]: p for p in PACKAGES}
 
 if _YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
     Configuration.account_id = YOOKASSA_SHOP_ID
     Configuration.secret_key = YOOKASSA_SECRET_KEY
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.getenv("ORDERS_DB") or os.path.join(tempfile.gettempdir(), "primerka_orders.db")
-IMG_DIR = os.path.join(tempfile.gettempdir(), "primerka_imgs")
+IMG_DIR = os.path.join(tempfile.gettempdir(), "seller_imgs")
 os.makedirs(IMG_DIR, exist_ok=True)
-
-# Простое хранилище задач примерки в памяти (на один процесс этого достаточно).
 TASKS = {}
 
-# --------------------------------------------------------------------- БД -----
-def db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# ------------------------------------------------------- База данных (PG/SQLite)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+USE_PG = DATABASE_URL.startswith("postgres")
+if USE_PG:
+    import psycopg2
+    import psycopg2.extras
+else:
+    import sqlite3
+    SQLITE_PATH = os.getenv("SQLITE_PATH") or os.path.join(tempfile.gettempdir(), "seller.db")
+
+
+def _conn():
+    if USE_PG:
+        return psycopg2.connect(DATABASE_URL)
+    c = sqlite3.connect(SQLITE_PATH)
+    c.row_factory = sqlite3.Row
+    return c
+
+
+def dbrun(sql, params=(), fetch=None):
+    """Выполняет запрос. fetch: None | 'one' | 'all'. Плейсхолдеры пишем '?'."""
+    q = sql.replace("?", "%s") if USE_PG else sql
+    with closing(_conn()) as conn:
+        if USE_PG:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        else:
+            cur = conn.cursor()
+        cur.execute(q, params)
+        out = None
+        if fetch == "one":
+            row = cur.fetchone()
+            out = dict(row) if row else None
+        elif fetch == "all":
+            out = [dict(r) for r in cur.fetchall()]
+        conn.commit()
+        return out
 
 
 def init_db():
     try:
-        with closing(db()) as conn:
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS orders(
-                    order_id   TEXT PRIMARY KEY,
-                    item_count INTEGER NOT NULL DEFAULT 0,
-                    paid       INTEGER NOT NULL DEFAULT 0,
-                    amount     TEXT,
-                    is_test    INTEGER NOT NULL DEFAULT 0,
+        dbrun("""CREATE TABLE IF NOT EXISTS codes(
+                    code TEXT PRIMARY KEY,
+                    package TEXT,
+                    credits_total INTEGER NOT NULL DEFAULT 0,
+                    credits_left INTEGER NOT NULL DEFAULT 0,
+                    has_video INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT )""")
+        dbrun("""CREATE TABLE IF NOT EXISTS orders(
+                    order_id TEXT PRIMARY KEY,
+                    package TEXT,
+                    amount TEXT,
+                    paid INTEGER NOT NULL DEFAULT 0,
+                    is_test INTEGER NOT NULL DEFAULT 0,
                     payment_id TEXT,
-                    created_at TEXT,
-                    result_token TEXT,
-                    visitor_id TEXT
-                )"""
-            )
-            for col in ("result_token", "visitor_id"):
-                try:
-                    conn.execute(f"ALTER TABLE orders ADD COLUMN {col} TEXT")
-                except Exception:
-                    pass
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS settings(
-                    key TEXT PRIMARY KEY, value TEXT
-                )"""
-            )
-            conn.execute(
-                """CREATE TABLE IF NOT EXISTS free_usage(
-                    visitor_id TEXT PRIMARY KEY, created_at TEXT
-                )"""
-            )
-            conn.commit()
+                    code TEXT,
+                    created_at TEXT )""")
+        dbrun("""CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)""")
+        dbrun("""CREATE TABLE IF NOT EXISTS free_usage(visitor_id TEXT PRIMARY KEY, created_at TEXT)""")
     except Exception as e:
         print("init_db warning:", e)
 
@@ -121,39 +137,25 @@ init_db()
 
 def get_setting(key, default=None):
     try:
-        with closing(db()) as conn:
-            row = conn.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-            return row["value"] if row else default
+        row = dbrun("SELECT value FROM settings WHERE key=?", (key,), "one")
+        return row["value"] if row else default
     except Exception:
         return default
 
 
 def set_setting(key, value):
-    with closing(db()) as conn:
-        conn.execute(
-            "INSERT INTO settings(key,value) VALUES(?,?) "
-            "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, str(value)),
-        )
-        conn.commit()
+    if dbrun("SELECT 1 FROM settings WHERE key=?", (key,), "one"):
+        dbrun("UPDATE settings SET value=? WHERE key=?", (str(value), key))
+    else:
+        dbrun("INSERT INTO settings(key,value) VALUES(?,?)", (key, str(value)))
 
 
 def now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
-def effective_price():
-    return get_setting("price") or DEFAULT_PRICE
-
-
 def test_mode():
     return (get_setting("test_mode") or "0") == "1"
-
-
-def sample_mode():
-    # Режим-образец: на превью показывается фиксированный образец (без генерации),
-    # реальный образ создаётся после оплаты. Экономит кредиты на непокупателях.
-    return (get_setting("sample_mode") or "0") == "1"
 
 
 def payments_ready():
@@ -164,193 +166,35 @@ def effective_payments_ready():
     return payments_ready() and not test_mode()
 
 
-def get_order(order_id):
-    with closing(db()) as conn:
-        row = conn.execute("SELECT * FROM orders WHERE order_id=?", (order_id,)).fetchone()
-        return dict(row) if row else None
+# ------------------------------------------------- Коды доступа / баланс -------
+def new_code():
+    alpha = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # без похожих символов
+    part = lambda: "".join(secrets.choice(alpha) for _ in range(4))
+    return f"SG-{part()}-{part()}"
 
 
-def set_paid(order_id):
-    with closing(db()) as conn:
-        conn.execute("UPDATE orders SET paid=1 WHERE order_id=?", (order_id,))
-        conn.commit()
+def create_code(package, count, has_video):
+    code = new_code()
+    dbrun("INSERT INTO codes(code,package,credits_total,credits_left,has_video,created_at) "
+          "VALUES(?,?,?,?,?,?)", (code, package, count, count, 1 if has_video else 0, now_iso()))
+    return code
 
 
-# ------------------------------------------- Бесплатные превью (лимит) --------
-def has_used_free(visitor_id):
-    if not visitor_id:
-        return False
-    try:
-        with closing(db()) as conn:
-            row = conn.execute("SELECT 1 FROM free_usage WHERE visitor_id=?",
-                               (visitor_id,)).fetchone()
-            return row is not None
-    except Exception:
-        return False
+def get_code(code):
+    code = (code or "").strip().upper()
+    return dbrun("SELECT * FROM codes WHERE code=?", (code,), "one")
 
 
-def mark_free_used(visitor_id):
-    if not visitor_id:
-        return
-    try:
-        with closing(db()) as conn:
-            conn.execute("INSERT OR IGNORE INTO free_usage(visitor_id, created_at) VALUES(?,?)",
-                         (visitor_id, now_iso()))
-            conn.commit()
-    except Exception as e:
-        print("mark_free_used warn:", e)
-
-
-# --------------------------------------------- Хранение результата -----------
-def _result_meta_path(token):
-    return os.path.join(IMG_DIR, f"result_{token}.json")
-
-
-def _result_file(token, suffix):
-    return os.path.join(IMG_DIR, f"result_{token}_{suffix}")
-
-
-def _save_result_meta(token, meta):
-    try:
-        with open(_result_meta_path(token), "w") as f:
-            json.dump(meta, f)
-    except Exception as e:
-        print("save result meta warn:", e)
-
-
-def _load_result_meta(token):
-    try:
-        with open(_result_meta_path(token)) as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _mark_result_paid(token):
-    if not token:
-        return
-    meta = _load_result_meta(token)
-    if meta and not meta.get("paid"):
-        meta["paid"] = True
-        _save_result_meta(token, meta)
-
-
-# Данные для ПОВТОРНОГО (платного) образа: одежда + модель, привязанные к заказу.
-def _order_gen_path(order_id):
-    return os.path.join(IMG_DIR, f"ordergen_{order_id}.json")
-
-
-def _store_order_gen(order_id, clothes, mannequin):
-    try:
-        with open(_order_gen_path(order_id), "w") as f:
-            json.dump({"clothes": clothes, "mannequin": mannequin}, f)
-    except Exception as e:
-        print("store order gen warn:", e)
-
-
-def _load_order_gen(order_id):
-    try:
-        with open(_order_gen_path(order_id)) as f:
-            return json.load(f)
-    except Exception:
-        return None
-
-
-def _set_order_result_token(order_id, token):
-    try:
-        with closing(db()) as conn:
-            conn.execute("UPDATE orders SET result_token=? WHERE order_id=?", (token, order_id))
-            conn.commit()
-    except Exception as e:
-        print("set order token warn:", e)
-
-
-def _download_to(url, path):
-    r = requests.get(url, timeout=180)
-    r.raise_for_status()
-    with open(path, "wb") as f:
-        f.write(r.content)
-
-
-def _wm_font(size, bold=True):
-    p = ("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
-         else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
-    try:
-        from PIL import ImageFont
-        return ImageFont.truetype(p, size)
-    except Exception:
-        from PIL import ImageFont
-        return ImageFont.load_default()
-
-
-def _watermark_layers(img_rgba):
-    """Наносит на RGBA-изображение диагональную «плитку» Online Primerka (обрезкой не убрать).
-    Виден на любом фоне (белый + тёмная обводка). Возвращает новое изображение."""
-    from PIL import Image, ImageDraw
-    W, H = img_rgba.size
-    fs = max(20, W // 20)
-    font = _wm_font(fs)
-    tile = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    td = ImageDraw.Draw(tile)
-    step_x = int(fs * 11)
-    step_y = int(fs * 3.2)
-    stroke = max(1, fs // 16)
-    y = -H
-    row = 0
-    while y < H * 2:
-        x = -W + (row % 2) * (step_x // 2)
-        while x < W * 2:
-            td.text((x, y), "Online Primerka", font=font, fill=(255, 255, 255, 115),
-                    stroke_width=stroke, stroke_fill=(0, 0, 0, 115))
-            x += step_x
-        y += step_y
-        row += 1
-    tile = tile.rotate(30, expand=False)
-    return Image.alpha_composite(img_rgba, tile)
-
-
-def make_preview(src_path, dst_path):
-    """Превью, которым НЕЛЬЗЯ пользоваться как готовым результатом: сильное размытие
-    («туман») + одно чёткое окно-кружок на линии талии (видно часть верха и часть низа)
-    + водяной знак."""
-    from PIL import Image, ImageDraw, ImageFilter
-    base = Image.open(src_path).convert("RGB")
-    W, H = base.size
-    # 1) Туман: снижаем детализацию и сильно размываем
-    small = base.resize((max(1, W // 3), max(1, H // 3)))
-    blurred = small.resize((W, H)).filter(ImageFilter.GaussianBlur(radius=max(6, W // 40)))
-    # 2) Чёткое окно-кружок из оригинала на линии талии (тизер: часть верха + часть низа)
-    r = int(W * 0.17)
-    cx = W // 2
-    cy = int(H * 0.47)
-    mask = Image.new("L", (W, H), 0)
-    ImageDraw.Draw(mask).ellipse([cx - r, cy - r, cx + r, cy + r], fill=255)
-    mask = mask.filter(ImageFilter.GaussianBlur(radius=max(2, r // 12)))
-    preview = Image.composite(base, blurred, mask)
-    ImageDraw.Draw(preview).ellipse([cx - r, cy - r, cx + r, cy + r],
-                                    outline=(255, 255, 255), width=max(2, W // 180))
-    # 3) Водяной знак поверх
-    preview = _watermark_layers(preview.convert("RGBA"))
-    preview.convert("RGB").save(dst_path, "JPEG", quality=85)
-
-
-def _save_garment_urls(garments):
-    urls = []
-    for g in (garments or []):
-        if not g:
-            continue
-        try:
-            urls.append(_save_dataurl(g))
-        except Exception:
-            pass
-        if len(urls) >= 8:
-            break
-    return urls
+def spend_credit(code):
+    """Атомарно списывает 1 генерацию, если баланс > 0. Возвращает остаток или None."""
+    code = (code or "").strip().upper()
+    dbrun("UPDATE codes SET credits_left = credits_left - 1 WHERE code=? AND credits_left > 0", (code,))
+    row = get_code(code)
+    return row["credits_left"] if row else None
 
 
 # ---------------------------------------------------------------- Манекены ----
 def mannequin_frame(n):
-    """Стоп-кадр манекена (портрет для примерки): model-1.jpg .. model-3.jpg."""
     for ext in ("jpg", "jpeg", "png", "webp"):
         p = os.path.join(HERE, f"model-{n}.{ext}")
         if os.path.exists(p):
@@ -358,40 +202,23 @@ def mannequin_frame(n):
     return None
 
 
-def mannequin_video(n):
-    """Необязательное видео манекена для красивой заставки: mannequin-1.mp4 .. -3.mp4."""
-    for ext in ("mp4", "webm", "mov"):
-        p = os.path.join(HERE, f"mannequin-{n}.{ext}")
-        if os.path.exists(p):
-            return p
-    return None
-
-
 def available_mannequins():
-    out = []
-    for n in (1, 2, 3):
-        if mannequin_frame(n):
-            out.append({"id": n, "hasVideo": mannequin_video(n) is not None})
-    return out
+    return [{"id": n} for n in (1, 2, 3) if mannequin_frame(n)]
 
 
 def tryon_enabled():
     return bool(WAVESPEED_API_KEY) and len(available_mannequins()) > 0
 
 
-# ------------------------------------------------------------- Приложение -----
-app = FastAPI(title="Online Primerka")
-app.add_middleware(
-    CORSMiddleware, allow_origins=[SITE_URL, "*"],
-    allow_methods=["*"], allow_headers=["*"],
-)
+# -------------------------------------------------------------- Приложение ----
+app = FastAPI(title="StyleGlobe Sellers")
+app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL, "*"],
+                   allow_methods=["*"], allow_headers=["*"])
 
 
 def _page(name):
     p = os.path.join(HERE, name)
-    if os.path.exists(p):
-        return FileResponse(p)
-    return JSONResponse({"detail": f"{name} не найден рядом с main.py"}, status_code=404)
+    return FileResponse(p) if os.path.exists(p) else JSONResponse({"detail": f"{name} не найден"}, status_code=404)
 
 
 @app.get("/")
@@ -414,10 +241,15 @@ def p_kontakty():
     return _page("kontakty.html")
 
 
+@app.get("/admin")
+def p_admin():
+    return _page("admin.html")
+
+
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "db": "postgres" if USE_PG else "sqlite"}
 
 
 @app.get("/model/{n}")
@@ -428,30 +260,17 @@ def model_frame(n: int):
     raise HTTPException(404, "манекен не найден")
 
 
-@app.get("/mannequin/{n}")
-def model_video(n: int):
-    p = mannequin_video(n)
-    if p:
-        return FileResponse(p)
-    raise HTTPException(404, "видео манекена не найдено")
-
-
 @app.get("/assets/{fname}")
 def asset_file(fname: str):
-    """Отдаёт файлы-примеры для главного экрана из папки assets/ рядом с main.py
-    (before-top.jpg, before-bottom.jpg, after-result.jpg, result-video.mp4 и т.п.)."""
-    safe = os.path.basename(fname)            # защита от выхода за пределы папки
-    p = os.path.join(HERE, "assets", safe)
+    p = os.path.join(HERE, "assets", os.path.basename(fname))
     if os.path.exists(p):
         return FileResponse(p)
-    raise HTTPException(404, "файл не найден")
+    raise HTTPException(404, "не найдено")
 
 
 @app.get("/api/img/{token}")
 def serve_img(token: str):
-    """Публичная ссылка на загруженное фото одежды — нужна, чтобы WaveSpeedAI
-    смог скачать изображение по URL. Токен случайный, файлы временные."""
-    safe = "".join(c for c in token if c.isalnum() or c in "-_")
+    safe = "".join(c for c in token if c.isalnum())
     p = os.path.join(IMG_DIR, safe + ".jpg")
     if os.path.exists(p):
         return FileResponse(p, media_type="image/jpeg")
@@ -461,106 +280,18 @@ def serve_img(token: str):
 @app.get("/api/config")
 def config():
     return {
-        "price": effective_price(),
         "currency": CURRENCY,
+        "packages": PACKAGES,
         "paymentsEnabled": effective_payments_ready(),
         "tryonEnabled": tryon_enabled(),
         "mannequins": available_mannequins(),
-        "minItems": 2,
-        "maxItems": 6,
-        "sampleMode": sample_mode(),
+        "maxItems": 8,
     }
 
 
-# ------------------------------------------------------------------ Оплата ----
-class CreatePaymentIn(BaseModel):
-    itemCount: int = 0
-    garments: List[str] = []      # dataURL фото одежды (для повторного платного образа)
-    token: str = ""               # результат (превью), который разблокируем в HD
-    mannequin: int = 1            # модель для повторного платного образа
-
-
-@app.post("/api/create-payment")
-def create_payment(data: CreatePaymentIn):
-    if not effective_payments_ready():
-        raise HTTPException(503, "Платежи не настроены или включён тестовый режим")
-    price = effective_price()
-    order_id = uuid.uuid4().hex
-    token = (data.token or "").strip()[:64]
-    with closing(db()) as conn:
-        conn.execute(
-            "INSERT INTO orders(order_id, item_count, paid, amount, is_test, created_at, result_token) "
-            "VALUES(?,?,0,?,0,?,?)",
-            (order_id, int(data.itemCount or 0), price, now_iso(), token or None),
-        )
-        conn.commit()
-
-    # Если это ПОВТОРНЫЙ образ (без готового превью) — сохраняем одежду и модель,
-    # чтобы после оплаты сразу сгенерировать чистый результат.
-    if not token and data.garments:
-        clothes = _save_garment_urls(data.garments)
-        mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
-            available_mannequins()[0]["id"] if available_mannequins() else 1)
-        _store_order_gen(order_id, clothes, mannequin)
-
-    payment = Payment.create(
-        {
-            "amount": {"value": price, "currency": CURRENCY},
-            "capture": True,
-            "confirmation": {"type": "redirect",
-                             "return_url": f"{SITE_URL}/?order_id={order_id}&token={token}"},
-            "description": "Онлайн примерка — HD-фото без водяного знака + видео",
-            "metadata": {"order_id": order_id},
-            # Продавец — самозанятый (НПД): фискальный чек по 54-ФЗ не формируется здесь.
-        },
-        uuid.uuid4().hex,
-    )
-    with closing(db()) as conn:
-        conn.execute("UPDATE orders SET payment_id=? WHERE order_id=?", (payment.id, order_id))
-        conn.commit()
-    return {"order_id": order_id, "confirmation_url": payment.confirmation.confirmation_url}
-
-
-def verify_and_mark(order):
-    if order["paid"]:
-        _mark_result_paid(order.get("result_token"))
-        return True
-    if not (payments_ready() and order.get("payment_id")):
-        return False
-    try:
-        p = Payment.find_one(order["payment_id"])
-        if getattr(p, "status", None) == "succeeded":
-            set_paid(order["order_id"])
-            _mark_result_paid(order.get("result_token"))
-            return True
-    except Exception:
-        return False
-    return False
-
-
-@app.get("/api/order/{order_id}")
-def order_status(order_id: str):
-    order = get_order(order_id)
-    if not order:
-        raise HTTPException(404, "Заказ не найден")
-    paid = bool(verify_and_mark(order))
-    return {"paid": paid, "token": order.get("result_token")}
-
-
-# --------------------------------------------------------------- Примерка -----
-class TryOnIn(BaseModel):
-    order_id: str
-    mannequin: int = 1
-    kind: str = "video"               # "photo" (быстро) или "video"
-    garments: List[str] = []          # dataURL картинок одежды (верх, низ, доп.)
-
-
+# ---------------------------------------------------- Изображения/водяной знак -
 def _save_dataurl(data_url):
-    """Сохраняет dataURL в файл и возвращает публичный URL для WaveSpeedAI."""
-    if "," in data_url:
-        head, b64 = data_url.split(",", 1)
-    else:
-        b64 = data_url
+    b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
     raw = base64.b64decode(b64)
     token = uuid.uuid4().hex
     with open(os.path.join(IMG_DIR, token + ".jpg"), "wb") as f:
@@ -568,12 +299,7 @@ def _save_dataurl(data_url):
     return f"{SITE_URL}/api/img/{token}"
 
 
-def _garment_index_path(order_id):
-    return os.path.join(IMG_DIR, f"order_{order_id}.json")
-
-
-def _store_garments(order_id, garments):
-    """Сохраняет фото одежды заказа на сервере и запоминает их публичные ссылки."""
+def _save_garment_urls(garments):
     urls = []
     for g in (garments or []):
         if not g:
@@ -584,23 +310,54 @@ def _store_garments(order_id, garments):
             pass
         if len(urls) >= 8:
             break
-    if urls:
-        try:
-            with open(_garment_index_path(order_id), "w") as f:
-                json.dump(urls, f)
-        except Exception as e:
-            print("store garments warn:", e)
     return urls
 
 
-def stored_garment_urls(order_id):
+def _download_to(url, path):
+    r = requests.get(url, timeout=180)
+    r.raise_for_status()
+    with open(path, "wb") as f:
+        f.write(r.content)
+
+
+def _wm_font(size):
+    from PIL import ImageFont
     try:
-        with open(_garment_index_path(order_id)) as f:
-            return json.load(f)
+        return ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", size)
     except Exception:
-        return []
+        return ImageFont.load_default()
 
 
+def make_transparent_watermark(src_path, dst_path):
+    """Прозрачный водяной знак «плиткой» по всей картинке. Картинка остаётся видна
+    (селлер оценивает ткань/складки), но использовать как готовое фото нельзя."""
+    from PIL import Image, ImageDraw
+    img = Image.open(src_path).convert("RGBA")
+    W, H = img.size
+    fs = max(20, W // 18)
+    font = _wm_font(fs)
+    tile = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    td = ImageDraw.Draw(tile)
+    text = "StyleGlobe • превью"
+    step_x = int(fs * 12)
+    step_y = int(fs * 3.4)
+    stroke = max(1, fs // 16)
+    y = -H
+    row = 0
+    while y < H * 2:
+        x = -W + (row % 2) * (step_x // 2)
+        while x < W * 2:
+            td.text((x, y), text, font=font, fill=(255, 255, 255, 105),
+                    stroke_width=stroke, stroke_fill=(0, 0, 0, 105))
+            x += step_x
+        y += step_y
+        row += 1
+    tile = tile.rotate(30, expand=False)
+    img = Image.alpha_composite(img, tile)
+    img.convert("RGB").save(dst_path, "JPEG", quality=88)
+
+
+# --------------------------------------------------------- WaveSpeed вызовы ----
 def _wavespeed_create(portrait_url, clothes_urls, model, with_duration):
     url = f"{WAVESPEED_BASE}/{model}"
     body = {"image": portrait_url, "clothes_images": clothes_urls}
@@ -608,19 +365,10 @@ def _wavespeed_create(portrait_url, clothes_urls, model, with_duration):
         body["duration"] = TRYON_DURATION
     if TRYON_PROMPT:
         body["prompt"] = TRYON_PROMPT
-    r = requests.post(
-        url,
-        headers={"Authorization": f"Bearer {WAVESPEED_API_KEY}",
-                 "Content-Type": "application/json"},
-        json=body, timeout=60,
-    )
+    r = requests.post(url, headers={"Authorization": f"Bearer {WAVESPEED_API_KEY}",
+                                    "Content-Type": "application/json"}, json=body, timeout=60)
     if r.status_code >= 400:
-        detail = ""
-        try:
-            detail = r.text[:400]
-        except Exception:
-            pass
-        raise RuntimeError(f"WaveSpeed {r.status_code}: {detail}")
+        raise RuntimeError(f"WaveSpeed {r.status_code}: {r.text[:400]}")
     j = r.json()
     data = j.get("data", j)
     pred_id = data.get("id") or j.get("id")
@@ -631,304 +379,259 @@ def _wavespeed_create(portrait_url, clothes_urls, model, with_duration):
 
 
 def _wavespeed_poll(poll_url):
-    r = requests.get(
-        poll_url,
-        headers={"Authorization": f"Bearer {WAVESPEED_API_KEY}"},
-        timeout=60,
-    )
+    r = requests.get(poll_url, headers={"Authorization": f"Bearer {WAVESPEED_API_KEY}"}, timeout=60)
     r.raise_for_status()
     j = r.json()
     data = j.get("data", j)
     status = (data.get("status") or j.get("status") or "").lower()
     out = data.get("outputs") or data.get("output") or j.get("output")
-    video = None
-    if isinstance(out, list) and out:
-        video = out[0]
-    elif isinstance(out, str):
-        video = out
-    return status, video
+    url = out[0] if isinstance(out, list) and out else (out if isinstance(out, str) else None)
+    return status, url
 
 
-def _run_tryon(task_id, mannequin, clothes_urls, kind):
-    TASKS[task_id] = {"status": "processing", "url": None, "kind": kind, "error": None}
+def _generate(portrait_url, clothes, kind):
+    is_video = (kind == "video")
+    model = WAVESPEED_VIDEO_MODEL if is_video else WAVESPEED_PHOTO_MODEL
+    pred_id, poll = _wavespeed_create(portrait_url, clothes, model, is_video and TRYON_SEND_DURATION)
+    if not poll:
+        raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
+    for _ in range(100 if is_video else 40):
+        time.sleep(3)
+        status, url = _wavespeed_poll(poll)
+        if status in ("completed", "succeeded", "success") and url:
+            return url
+        if status in ("failed", "error", "canceled"):
+            raise RuntimeError(f"WaveSpeed вернул статус: {status}")
+    raise RuntimeError("превышено время ожидания результата")
+
+
+# --------------------------------------------- Бесплатное превью (1 на гостя) --
+def has_used_free(vid):
+    if not vid:
+        return False
+    try:
+        return dbrun("SELECT 1 FROM free_usage WHERE visitor_id=?", (vid,), "one") is not None
+    except Exception:
+        return False
+
+
+def mark_free_used(vid):
+    if not vid:
+        return
+    try:
+        if not dbrun("SELECT 1 FROM free_usage WHERE visitor_id=?", (vid,), "one"):
+            dbrun("INSERT INTO free_usage(visitor_id,created_at) VALUES(?,?)", (vid, now_iso()))
+    except Exception as e:
+        print("mark_free_used warn:", e)
+
+
+class FreePreviewIn(BaseModel):
+    mannequin: int = 1
+    garments: List[str] = []
+    visitorId: str = ""
+
+
+def _run_free_preview(task_id, token, mannequin, clothes, vid):
+    TASKS[task_id] = {"status": "processing", "token": token, "error": None}
     try:
         portrait = f"{SITE_URL}/model/{mannequin}"
-        clothes = [u for u in (clothes_urls or []) if u][:8]
-        if not clothes:
-            raise RuntimeError("нет изображений одежды")
-        is_video = (kind == "video")
-        model = WAVESPEED_VIDEO_MODEL if is_video else WAVESPEED_PHOTO_MODEL
-        with_duration = is_video and TRYON_SEND_DURATION
-        pred_id, poll_url = _wavespeed_create(portrait, clothes, model, with_duration)
-        if not poll_url:
-            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        # Видео обычно ~60–120 сек, картинка — ~10–30 сек.
-        max_polls = 80 if is_video else 30
-        for _ in range(max_polls):
-            time.sleep(3)
-            status, url = _wavespeed_poll(poll_url)
-            if status in ("completed", "succeeded", "success") and url:
-                TASKS[task_id] = {"status": "done", "url": url, "kind": kind, "error": None}
-                return
-            if status in ("failed", "error", "canceled"):
-                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
-        raise RuntimeError("превышено время ожидания результата")
+        url = _generate(portrait, clothes, "photo")
+        hd = os.path.join(IMG_DIR, f"prev_{token}.jpg")
+        _download_to(url, hd)
+        make_transparent_watermark(hd, os.path.join(IMG_DIR, f"prevwm_{token}.jpg"))
+        mark_free_used(vid)
+        TASKS[task_id] = {"status": "done", "token": token, "error": None,
+                          "previewUrl": f"/api/preview/{token}"}
     except Exception as e:
-        TASKS[task_id] = {"status": "error", "url": None, "kind": kind, "error": str(e)}
+        TASKS[task_id] = {"status": "error", "token": token, "error": str(e)}
 
 
-@app.post("/api/tryon")
-def start_tryon(data: TryOnIn):
-    order = get_order(data.order_id)
-    if not order:
-        raise HTTPException(404, "Заказ не найден")
-    if not (order["is_test"] or verify_and_mark(order)):
-        raise HTTPException(402, "Оплата не найдена или ещё не подтверждена")
+@app.post("/api/free-preview")
+def free_preview(data: FreePreviewIn):
     if not tryon_enabled():
-        raise HTTPException(503, "Примерка не настроена (нет ключа WaveSpeed или манекенов)")
-    # Картинки одежды: сначала берём сохранённые на сервере при оплате;
-    # если их нет (демо/тест) — принимаем из запроса и сохраняем.
-    clothes = stored_garment_urls(data.order_id)
-    if not clothes and data.garments:
-        clothes = _store_garments(data.order_id, data.garments)
+        raise HTTPException(503, "Генерация не настроена (нет ключа WaveSpeed или манекенов)")
+    vid = (data.visitorId or "").strip()[:64]
+    if vid and has_used_free(vid):
+        raise HTTPException(429, "Бесплатное превью уже использовано. Купите пакет, чтобы создавать фото в HD.")
+    clothes = _save_garment_urls(data.garments)
     if not clothes:
-        raise HTTPException(400, "Нет фото одежды")
+        raise HTTPException(400, "Нет фото товара")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
         available_mannequins()[0]["id"] if available_mannequins() else 1)
-    kind = "photo" if str(data.kind).lower() == "photo" else "video"
+    token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "url": None, "kind": kind, "error": None}
-    threading.Thread(target=_run_tryon, args=(task_id, mannequin, clothes, kind),
+    TASKS[task_id] = {"status": "processing", "token": token, "error": None}
+    threading.Thread(target=_run_free_preview, args=(task_id, token, mannequin, clothes, vid),
                      daemon=True).start()
-    return {"task_id": task_id}
+    return {"task_id": task_id, "token": token}
 
 
-@app.get("/api/tryon/{task_id}")
-def tryon_status(task_id: str):
+@app.get("/api/preview/{token}")
+def serve_preview(token: str):
+    safe = "".join(c for c in token if c.isalnum())
+    p = os.path.join(IMG_DIR, f"prevwm_{safe}.jpg")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="image/jpeg")
+    raise HTTPException(404, "не найдено")
+
+
+@app.get("/api/task/{task_id}")
+def task_status(task_id: str):
     t = TASKS.get(task_id)
     if not t:
         raise HTTPException(404, "Задача не найдена")
     return t
 
 
-# ============================================================================
-#           FREEMIUM: бесплатное фото с водяным знаком → HD за оплату
-# ============================================================================
-class FreePhotoIn(BaseModel):
+# ---------------------------------------------------------- Покупка пакета ----
+class CreatePaymentIn(BaseModel):
+    package: str
+
+
+@app.post("/api/create-payment")
+def create_payment(data: CreatePaymentIn):
+    if not effective_payments_ready():
+        raise HTTPException(503, "Платежи не настроены или включён тестовый режим")
+    pkg = PACKAGE_BY_ID.get(data.package)
+    if not pkg:
+        raise HTTPException(400, "Неизвестный пакет")
+    order_id = uuid.uuid4().hex
+    dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,created_at) VALUES(?,?,?,0,0,?)",
+          (order_id, pkg["id"], pkg["price"], now_iso()))
+    payment = Payment.create({
+        "amount": {"value": pkg["price"], "currency": CURRENCY},
+        "capture": True,
+        "confirmation": {"type": "redirect", "return_url": f"{SITE_URL}/?order_id={order_id}"},
+        "description": f"StyleGlobe — пакет «{pkg['title']}» ({pkg['count']} генераций)",
+        "metadata": {"order_id": order_id},
+    }, uuid.uuid4().hex)
+    dbrun("UPDATE orders SET payment_id=? WHERE order_id=?", (payment.id, order_id))
+    return {"order_id": order_id, "confirmation_url": payment.confirmation.confirmation_url}
+
+
+def _issue_code_for_order(order):
+    if order.get("code"):
+        return order["code"]
+    pkg = PACKAGE_BY_ID.get(order["package"])
+    if not pkg:
+        return None
+    code = create_code(pkg["id"], pkg["count"], pkg["video"])
+    dbrun("UPDATE orders SET code=? WHERE order_id=?", (code, order["order_id"]))
+    return code
+
+
+def verify_and_issue(order):
+    if order["paid"]:
+        return True, (order.get("code") or _issue_code_for_order(order))
+    if not (payments_ready() and order.get("payment_id")):
+        return False, None
+    try:
+        p = Payment.find_one(order["payment_id"])
+        if getattr(p, "status", None) == "succeeded":
+            dbrun("UPDATE orders SET paid=1 WHERE order_id=?", (order["order_id"],))
+            order["paid"] = 1
+            return True, _issue_code_for_order(order)
+    except Exception:
+        return False, None
+    return False, None
+
+
+@app.get("/api/order/{order_id}")
+def order_status(order_id: str):
+    order = dbrun("SELECT * FROM orders WHERE order_id=?", (order_id,), "one")
+    if not order:
+        raise HTTPException(404, "Заказ не найден")
+    paid, code = verify_and_issue(order)
+    return {"paid": bool(paid), "code": code}
+
+
+@app.get("/api/code/{code}")
+def code_info(code: str):
+    row = get_code(code)
+    if not row:
+        return {"valid": False}
+    return {"valid": True, "creditsLeft": row["credits_left"], "creditsTotal": row["credits_total"],
+            "hasVideo": bool(row["has_video"]), "package": row["package"]}
+
+
+# ------------------------------------------- Генерация в HD (списание кредита) -
+class GenerateIn(BaseModel):
+    code: str
     mannequin: int = 1
+    kind: str = "photo"
     garments: List[str] = []
-    visitorId: str = ""
 
 
-def _run_free_photo(task_id, token, mannequin, clothes_urls, visitor_id):
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
+def _run_hd(task_id, token, mannequin, clothes, kind):
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
     try:
         portrait = f"{SITE_URL}/model/{mannequin}"
-        clothes = [u for u in (clothes_urls or []) if u][:8]
-        if not clothes:
-            raise RuntimeError("нет изображений одежды")
-        pred_id, poll_url = _wavespeed_create(portrait, clothes, WAVESPEED_PHOTO_MODEL, False)
-        if not poll_url:
-            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        for _ in range(40):
-            time.sleep(3)
-            status, url = _wavespeed_poll(poll_url)
-            if status in ("completed", "succeeded", "success") and url:
-                hd_path = _result_file(token, "hd.jpg")
-                _download_to(url, hd_path)                     # чистое фото (спрятано)
-                make_preview(hd_path, _result_file(token, "wm.jpg"))  # превью: туман + окно + знак
-                _save_result_meta(token, {"kind": "photo", "paid": False,
-                                          "mannequin": mannequin, "clothes": clothes,
-                                          "created_at": now_iso()})
-                mark_free_used(visitor_id)                     # лимит только при успехе
-                TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
-                                  "error": None, "previewUrl": f"/api/result/{token}/preview"}
-                return
-            if status in ("failed", "error", "canceled"):
-                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
-        raise RuntimeError("превышено время ожидания результата")
+        url = _generate(portrait, clothes, kind)
+        if kind == "photo":
+            _download_to(url, os.path.join(IMG_DIR, f"hd_{token}.jpg"))
+            TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
+                              "error": None, "url": f"/api/hd/{token}.jpg"}
+        else:
+            TASKS[task_id] = {"status": "done", "token": token, "kind": "video",
+                              "error": None, "url": url}
     except Exception as e:
-        TASKS[task_id] = {"status": "error", "token": token, "kind": "photo", "error": str(e)}
+        TASKS[task_id] = {"status": "error", "token": token, "kind": kind, "error": str(e)}
 
 
-@app.post("/api/free-photo")
-def free_photo(data: FreePhotoIn):
+@app.get("/api/hd/{name}")
+def serve_hd(name: str):
+    safe = "".join(c for c in name.replace(".jpg", "") if c.isalnum())
+    p = os.path.join(IMG_DIR, f"hd_{safe}.jpg")
+    if os.path.exists(p):
+        return FileResponse(p, media_type="image/jpeg", filename="styleglobe-hd.jpg")
+    raise HTTPException(404, "не найдено")
+
+
+@app.post("/api/generate")
+def generate_hd(data: GenerateIn):
+    row = get_code(data.code)
+    if not row:
+        raise HTTPException(404, "Код не найден")
+    if row["credits_left"] <= 0:
+        raise HTTPException(402, "Генерации закончились. Купите новый пакет.")
+    kind = "video" if str(data.kind).lower() == "video" else "photo"
+    if kind == "video" and not row["has_video"]:
+        raise HTTPException(403, "В вашем пакете видео не входит")
     if not tryon_enabled():
-        raise HTTPException(503, "Примерка не настроена (нет ключа WaveSpeed или манекенов)")
-    vid = (data.visitorId or "").strip()[:64]
-    if vid and has_used_free(vid):
-        raise HTTPException(429, "Бесплатное превью уже использовано. Оплатите, чтобы получить результат в HD.")
+        raise HTTPException(503, "Генерация не настроена")
     clothes = _save_garment_urls(data.garments)
     if not clothes:
-        raise HTTPException(400, "Нет фото одежды")
+        raise HTTPException(400, "Нет фото товара")
+    left = spend_credit(data.code)          # списываем ДО запуска
+    if left is None:
+        raise HTTPException(402, "Генерации закончились")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
         available_mannequins()[0]["id"] if available_mannequins() else 1)
     token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
-    threading.Thread(target=_run_free_photo, args=(task_id, token, mannequin, clothes, vid),
+    TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
+    threading.Thread(target=_run_hd, args=(task_id, token, mannequin, clothes, kind),
                      daemon=True).start()
-    return {"task_id": task_id, "token": token}
-
-
-@app.get("/api/result/{token}/preview")
-def result_preview(token: str):
-    safe = "".join(c for c in token if c.isalnum())
-    p = _result_file(safe, "wm.jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg")
-    raise HTTPException(404, "не найдено")
-
-
-@app.get("/api/result/{token}/hd")
-def result_hd(token: str):
-    safe = "".join(c for c in token if c.isalnum())
-    meta = _load_result_meta(safe)
-    if not meta:
-        raise HTTPException(404, "не найдено")
-    if not meta.get("paid"):
-        raise HTTPException(402, "Доступно после оплаты")
-    p = _result_file(safe, "hd.jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg", filename="primerka-hd.jpg")
-    raise HTTPException(404, "не найдено")
-
-
-class MakeVideoIn(BaseModel):
-    token: str
-
-
-def _run_video_paid(task_id, token, mannequin, clothes_urls):
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": "video", "error": None}
-    try:
-        portrait = f"{SITE_URL}/model/{mannequin}"
-        clothes = [u for u in (clothes_urls or []) if u][:8]
-        if not clothes:
-            raise RuntimeError("нет изображений одежды")
-        pred_id, poll_url = _wavespeed_create(portrait, clothes, WAVESPEED_VIDEO_MODEL, TRYON_SEND_DURATION)
-        if not poll_url:
-            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        for _ in range(100):
-            time.sleep(3)
-            status, url = _wavespeed_poll(poll_url)
-            if status in ("completed", "succeeded", "success") and url:
-                TASKS[task_id] = {"status": "done", "token": token, "kind": "video",
-                                  "error": None, "url": url}
-                return
-            if status in ("failed", "error", "canceled"):
-                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
-        raise RuntimeError("превышено время ожидания результата")
-    except Exception as e:
-        TASKS[task_id] = {"status": "error", "token": token, "kind": "video", "error": str(e)}
-
-
-@app.post("/api/make-video")
-def make_video(data: MakeVideoIn):
-    safe = "".join(c for c in (data.token or "") if c.isalnum())
-    meta = _load_result_meta(safe)
-    if not meta:
-        raise HTTPException(404, "Результат не найден")
-    if not meta.get("paid"):
-        raise HTTPException(402, "Видео доступно после оплаты")
-    if not tryon_enabled():
-        raise HTTPException(503, "Примерка не настроена")
-    clothes = meta.get("clothes") or []
-    mannequin = meta.get("mannequin", 1)
-    task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "token": safe, "kind": "video", "error": None}
-    threading.Thread(target=_run_video_paid, args=(task_id, safe, mannequin, clothes),
-                     daemon=True).start()
-    return {"task_id": task_id}
-
-
-# ----------- ПОВТОРНЫЙ образ: оплата вперёд → генерация чистого результата -----
-def _run_paid_photo(task_id, token, order_id, mannequin, clothes_urls):
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
-    try:
-        portrait = f"{SITE_URL}/model/{mannequin}"
-        clothes = [u for u in (clothes_urls or []) if u][:8]
-        if not clothes:
-            raise RuntimeError("нет изображений одежды")
-        pred_id, poll_url = _wavespeed_create(portrait, clothes, WAVESPEED_PHOTO_MODEL, False)
-        if not poll_url:
-            raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
-        for _ in range(40):
-            time.sleep(3)
-            status, url = _wavespeed_poll(poll_url)
-            if status in ("completed", "succeeded", "success") and url:
-                hd_path = _result_file(token, "hd.jpg")
-                _download_to(url, hd_path)          # платный образ — сразу чистый, без знака
-                _save_result_meta(token, {"kind": "photo", "paid": True,
-                                          "mannequin": mannequin, "clothes": clothes,
-                                          "created_at": now_iso()})
-                _set_order_result_token(order_id, token)
-                TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
-                                  "error": None, "hdUrl": f"/api/result/{token}/hd"}
-                return
-            if status in ("failed", "error", "canceled"):
-                raise RuntimeError(f"WaveSpeed вернул статус: {status}")
-        raise RuntimeError("превышено время ожидания результата")
-    except Exception as e:
-        TASKS[task_id] = {"status": "error", "token": token, "kind": "photo", "error": str(e)}
-
-
-class PaidGenIn(BaseModel):
-    order_id: str
-
-
-@app.post("/api/paid-generate")
-def paid_generate(data: PaidGenIn):
-    order = get_order(data.order_id)
-    if not order:
-        raise HTTPException(404, "Заказ не найден")
-    if not (order["is_test"] or verify_and_mark(order)):
-        raise HTTPException(402, "Оплата не найдена или ещё не подтверждена")
-    if order.get("result_token"):
-        return {"token": order["result_token"], "ready": True}
-    if not tryon_enabled():
-        raise HTTPException(503, "Примерка не настроена")
-    gen = _load_order_gen(data.order_id)
-    if not gen or not gen.get("clothes"):
-        raise HTTPException(400, "Нет данных для создания образа")
-    token = uuid.uuid4().hex
-    task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": "photo", "error": None}
-    threading.Thread(target=_run_paid_photo,
-                     args=(task_id, token, data.order_id, gen.get("mannequin", 1), gen["clothes"]),
-                     daemon=True).start()
-    return {"task_id": task_id, "token": token}
+    return {"task_id": task_id, "creditsLeft": left}
 
 
 # ------------------------------------------------------------- Тест-заказ -----
 class TestOrderIn(BaseModel):
-    itemCount: int = 0
-    token: str = ""
-    mannequin: int = 1
-    garments: List[str] = []
+    package: str
 
 
 @app.post("/api/test-order")
 def test_order(data: TestOrderIn):
-    """Создаёт тестовый оплаченный заказ (только в тестовом/демо-режиме)."""
     if effective_payments_ready():
         raise HTTPException(403, "Недоступно в боевом режиме")
+    pkg = PACKAGE_BY_ID.get(data.package)
+    if not pkg:
+        raise HTTPException(400, "Неизвестный пакет")
     order_id = uuid.uuid4().hex
-    token = (data.token or "").strip()[:64]
-    with closing(db()) as conn:
-        conn.execute(
-            "INSERT INTO orders(order_id, item_count, paid, amount, is_test, created_at, result_token) "
-            "VALUES(?,?,1,?,1,?,?)",
-            (order_id, int(data.itemCount or 0), effective_price(), now_iso(), token or None),
-        )
-        conn.commit()
-    if token:
-        _mark_result_paid(token)                       # freemium: разблокировать превью
-    elif data.garments:                                # повторный платный образ
-        clothes = _save_garment_urls(data.garments)
-        mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
-            available_mannequins()[0]["id"] if available_mannequins() else 1)
-        _store_order_gen(order_id, clothes, mannequin)
-    return {"ok": True, "order_id": order_id}
+    code = create_code(pkg["id"], pkg["count"], pkg["video"])
+    dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,code,created_at) "
+          "VALUES(?,?,?,1,1,?,?)", (order_id, pkg["id"], pkg["price"], code, now_iso()))
+    return {"ok": True, "order_id": order_id, "code": code}
 
 
 # ------------------------------------------------------------- Админка --------
@@ -937,9 +640,7 @@ class AdminLoginIn(BaseModel):
 
 
 class SettingsIn(BaseModel):
-    price: Optional[str] = None
     test_mode: Optional[bool] = None
-    sample_mode: Optional[bool] = None
 
 
 def require_admin(request: Request):
@@ -949,68 +650,42 @@ def require_admin(request: Request):
         raise HTTPException(401, "Требуется вход администратора")
 
 
-@app.get("/admin")
-def admin_page():
-    return _page("admin.html")
-
-
 @app.post("/api/admin/login")
 def admin_login(data: AdminLoginIn):
     if not ADMIN_PASSWORD:
-        raise HTTPException(503, "Задайте переменную ADMIN_PASSWORD")
+        raise HTTPException(503, "Задайте ADMIN_PASSWORD")
     if data.password != ADMIN_PASSWORD:
         raise HTTPException(401, "Неверный пароль")
     return {"token": ADMIN_TOKEN}
 
 
-def _all_orders():
-    with closing(db()) as conn:
-        return [dict(r) for r in conn.execute(
-            "SELECT * FROM orders ORDER BY created_at DESC").fetchall()]
-
-
 @app.get("/api/admin/stats")
 def admin_stats(request: Request):
     require_admin(request)
-    orders = _all_orders()
-    paid = [o for o in orders if o["paid"]]
-    real_paid = [o for o in paid if not o["is_test"]]
+    orders = dbrun("SELECT * FROM orders ORDER BY created_at DESC", (), "all") or []
+    real_paid = [o for o in orders if o["paid"] and not o["is_test"]]
     revenue = sum(float(o["amount"] or 0) for o in real_paid)
-    return {
-        "orders": len(orders),
-        "paidOrders": len(paid),
-        "revenue": round(revenue, 2),
-        "currency": CURRENCY,
-        "price": effective_price(),
-        "testMode": test_mode(),
-        "sampleMode": sample_mode(),
-        "paymentsReady": payments_ready(),
-        "tryonEnabled": tryon_enabled(),
-        "mannequins": len(available_mannequins()),
-    }
+    codes = dbrun("SELECT * FROM codes", (), "all") or []
+    return {"orders": len(orders), "paidOrders": len([o for o in orders if o["paid"]]),
+            "revenue": round(revenue, 2), "currency": CURRENCY, "testMode": test_mode(),
+            "paymentsReady": payments_ready(), "tryonEnabled": tryon_enabled(),
+            "mannequins": len(available_mannequins()), "codes": len(codes),
+            "creditsLeft": sum(c["credits_left"] for c in codes),
+            "db": "postgres" if USE_PG else "sqlite (ВРЕМЕННАЯ — задайте DATABASE_URL!)"}
 
 
 @app.get("/api/admin/orders")
 def admin_orders(request: Request):
     require_admin(request)
-    return {"orders": _all_orders()[:200]}
+    return {"orders": (dbrun("SELECT * FROM orders ORDER BY created_at DESC", (), "all") or [])[:200]}
 
 
 @app.post("/api/admin/settings")
 def admin_settings(request: Request, data: SettingsIn):
     require_admin(request)
-    if data.price is not None:
-        try:
-            val = float(str(data.price).replace(",", "."))
-            set_setting("price", f"{val:.2f}")
-        except ValueError:
-            raise HTTPException(400, "Некорректная цена")
     if data.test_mode is not None:
         set_setting("test_mode", "1" if data.test_mode else "0")
-    if data.sample_mode is not None:
-        set_setting("sample_mode", "1" if data.sample_mode else "0")
-    return {"ok": True, "price": effective_price(), "testMode": test_mode(),
-            "sampleMode": sample_mode()}
+    return {"ok": True, "testMode": test_mode()}
 
 
 # -------------------------------------------------------------- Вебхук --------
@@ -1023,7 +698,7 @@ async def yookassa_webhook(request: Request):
     if (body or {}).get("event") == "payment.succeeded":
         order_id = ((body.get("object") or {}).get("metadata") or {}).get("order_id")
         if order_id:
-            order = get_order(order_id)
+            order = dbrun("SELECT * FROM orders WHERE order_id=?", (order_id,), "one")
             if order:
-                verify_and_mark(order)  # источник истины — проверка через API
+                verify_and_issue(order)
     return Response(status_code=200)

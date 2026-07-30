@@ -3,19 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Онлайн примерка — Админка</title>
+<title>StyleGlobe для селлеров — Админка</title>
 <style>
   *{box-sizing:border-box;}
   body{margin:0; font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; background:#14151a; color:#e7e7ea;}
-  .wrap{max-width:900px; margin:0 auto; padding:26px 18px 60px;}
+  .wrap{max-width:960px; margin:0 auto; padding:26px 18px 60px;}
   h1{font-size:20px; margin:0 0 18px;}
   [hidden]{display:none !important;}
   .login{max-width:340px; margin:60px auto; background:#1c1e26; padding:24px; border-radius:14px;}
-  input{width:100%; padding:12px; border-radius:10px; border:1px solid #333; background:#0f1014; color:#fff; font-size:15px;}
+  input,select{width:100%; padding:12px; border-radius:10px; border:1px solid #333; background:#0f1014; color:#fff; font-size:15px;}
   .btn{width:100%; margin-top:12px; padding:12px; border:none; border-radius:10px; background:#e5395b; color:#fff; font-weight:700; font-size:15px; cursor:pointer;}
-  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:22px;}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:22px;}
   .kpi{background:#1c1e26; border-radius:12px; padding:16px;}
-  .kpi .v{font-size:24px; font-weight:800;}
+  .kpi .v{font-size:22px; font-weight:800;}
   .kpi .l{font-size:12px; color:#9a9aa5; margin-top:4px;}
   table{width:100%; border-collapse:collapse; font-size:13px; background:#1c1e26; border-radius:12px; overflow:hidden;}
   th,td{padding:9px 11px; text-align:left; border-bottom:1px solid #262832;}
@@ -23,10 +23,11 @@
   .row{display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; background:#1c1e26; padding:16px; border-radius:12px; margin-bottom:22px;}
   .row label{font-size:12px; color:#9a9aa5; display:block; margin-bottom:5px;}
   .row .field{flex:0 0 auto;}
-  .row input[type=text]{width:120px;}
   .muted{color:#9a9aa5; font-size:12px;}
   .err{color:#ff8098; font-size:13px; margin-top:8px;}
   .ok{color:#5fd08a;}
+  .warn{background:#3a2410; border:1px solid #7a5216; color:#f0c07a; padding:10px 12px; border-radius:10px; font-size:13px; margin-bottom:18px;}
+  code{background:#0f1014; padding:1px 6px; border-radius:5px;}
 </style>
 </head>
 <body>
@@ -42,26 +43,18 @@
 
   <div id="panel" hidden>
     <a href="/" style="display:inline-block; margin-bottom:12px; color:#8ab4ff; text-decoration:none; font-size:14px;">← Вернуться на сайт</a>
-    <h1>Онлайн примерка — панель</h1>
+    <h1>StyleGlobe для селлеров — панель</h1>
+
+    <div id="dbWarn" class="warn" hidden></div>
+
     <div class="grid" id="kpis"></div>
 
     <div class="row">
       <div class="field">
-        <label>Цена, ₽</label>
-        <input type="text" id="price">
-      </div>
-      <div class="field">
         <label>Тестовый режим</label>
-        <select id="testMode" style="padding:11px;border-radius:10px;background:#0f1014;color:#fff;border:1px solid #333;">
+        <select id="testMode">
           <option value="0">Выключен (боевая оплата)</option>
           <option value="1">Включён (без реальной оплаты)</option>
-        </select>
-      </div>
-      <div class="field">
-        <label>Режим-образец (превью без генерации)</label>
-        <select id="sampleMode" style="padding:11px;border-radius:10px;background:#0f1014;color:#fff;border:1px solid #333;">
-          <option value="0">Выключен (превью из вещей клиента)</option>
-          <option value="1">Включён (показывать образец, экономить кредиты)</option>
         </select>
       </div>
       <div class="field">
@@ -72,7 +65,7 @@
 
     <h1 style="font-size:16px;">Заказы</h1>
     <table id="ordersTable">
-      <thead><tr><th>Дата</th><th>Вещей</th><th>Сумма</th><th>Оплачен</th><th>Тест</th></tr></thead>
+      <thead><tr><th>Дата</th><th>Пакет</th><th>Сумма</th><th>Оплачен</th><th>Код доступа</th><th>Тест</th></tr></thead>
       <tbody></tbody>
     </table>
     <p class="muted" id="tryNote" style="margin-top:14px;"></p>
@@ -103,31 +96,37 @@ async function api(path){
 
 async function loadAll(){
   const s = await api('/api/admin/stats');
+  if(s.db && s.db.indexOf('sqlite')===0){
+    $('dbWarn').hidden=false;
+    $('dbWarn').innerHTML='⚠️ База данных временная (<code>'+s.db+'</code>). Балансы кодов сбросятся при перезапуске. Задайте переменную <code>DATABASE_URL</code> (PostgreSQL) в настройках приложения.';
+  } else {
+    $('dbWarn').hidden=true;
+  }
   $('kpis').innerHTML = [
     ['Выручка', s.revenue+' '+(s.currency==='RUB'?'₽':s.currency)],
-    ['Оплаченных', s.paidOrders],
+    ['Оплаченных заказов', s.paidOrders],
     ['Всего заказов', s.orders],
-    ['Цена', s.price+' ₽'],
+    ['Выдано кодов', s.codes],
+    ['Осталось генераций', s.creditsLeft],
   ].map(k=>`<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div></div>`).join('');
-  $('price').value = s.price;
   $('testMode').value = s.testMode ? '1':'0';
-  $('sampleMode').value = s.sampleMode ? '1':'0';
-  $('tryNote').textContent = `Примерка: ${s.tryonEnabled?'включена':'выключена'} · манекенов: ${s.mannequins} · оплата: ${s.paymentsReady?'подключена':'не подключена'}`;
+  $('tryNote').textContent = `Примерка: ${s.tryonEnabled?'включена':'выключена'} · манекенов: ${s.mannequins} · оплата: ${s.paymentsReady?'подключена':'не подключена'} · БД: ${s.db}`;
   const o = await api('/api/admin/orders');
   const tb = document.querySelector('#ordersTable tbody');
   tb.innerHTML = o.orders.map(x=>`<tr>
-    <td>${(x.created_at||'').replace('T',' ')}</td>
-    <td>${x.item_count||0}</td>
+    <td>${(x.created_at||'').replace('T',' ').slice(0,19)}</td>
+    <td>${x.package||''}</td>
     <td>${x.amount||''}</td>
     <td>${x.paid?'✅':'—'}</td>
-    <td>${x.is_test?'тест':''}</td></tr>`).join('') || '<tr><td colspan=5 class="muted">Заказов пока нет</td></tr>';
+    <td>${x.code||''}</td>
+    <td>${x.is_test?'тест':''}</td></tr>`).join('') || '<tr><td colspan=6 class="muted">Заказов пока нет</td></tr>';
 }
 
 async function saveSettings(){
   $('saveMsg').textContent='';
   const r = await fetch('/api/admin/settings',{method:'POST',
     headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
-    body:JSON.stringify({price:$('price').value, test_mode: $('testMode').value==='1', sample_mode: $('sampleMode').value==='1'})});
+    body:JSON.stringify({test_mode: $('testMode').value==='1'})});
   if(r.ok){ $('saveMsg').textContent='Сохранено'; loadAll(); }
   else{ $('saveMsg').textContent='Ошибка'; }
 }
