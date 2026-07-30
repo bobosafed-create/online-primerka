@@ -236,7 +236,7 @@
       <img id="previewImg" alt="превью образа" style="width:100%; border-radius:14px; display:block;">
       <div class="preview-note" id="previewNote">Это бесплатное превью с водяным знаком.</div>
       <div class="paywall">
-        <button class="btn" id="buyBtn" onclick="onBuy()">🔓 Создать фото и видео образ в HD без водяного знака — <span id="buyPrice">99</span> ₽</button>
+        <button class="btn" id="buyBtn" onclick="onBuy()" style="font-size:14px; line-height:1.25;">🔓 Фото и видео в HD без водяного знака — <span id="buyPrice">99</span> ₽</button>
         <div class="paywall-note">После оплаты откроется чистое фото в HD <b>и</b> видео-образ — их можно сохранить и скачать.</div>
         <div class="guarantee">🛡️ <b>Сначала бесплатное превью</b> — вы платите только за результат, который уже видели.</div>
         <div class="err" id="payErr"></div>
@@ -492,7 +492,7 @@ async function startSamplePurchase(){
     }catch(e){
       $('payErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
       $('buyBtn').disabled=false;
-      $('buyBtn').innerHTML=`🔓 Создать фото и видео образ в HD без водяного знака — ${priceTxt} ₽`;
+      $('buyBtn').innerHTML=`🔓 Фото и видео в HD без водяного знака — ${priceTxt} ₽`;
     }
   } else {
     try{
@@ -564,7 +564,7 @@ async function startPay(){
     }catch(e){
       $('payErr').textContent='Не удалось создать платёж. Попробуйте ещё раз.';
       $('buyBtn').disabled=false;
-      $('buyBtn').innerHTML=`🔓 Создать фото и видео образ в HD без водяного знака — ${priceTxt} ₽`;
+      $('buyBtn').innerHTML=`🔓 Фото и видео в HD без водяного знака — ${priceTxt} ₽`;
     }
   } else {
     try{
