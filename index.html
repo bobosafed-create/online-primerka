@@ -320,6 +320,8 @@ function selectPackage(id){
 async function buyPackage(){
   $('buyErr').textContent='';
   if(!selectedPackage){ $('buyErr').textContent='Выберите пакет.'; return; }
+  // запоминаем уже загруженную вещь и модель, чтобы после оплаты не загружать заново
+  try{ sessionStorage.setItem('sg_pending', JSON.stringify({garments:garments(), mannequin:selectedMannequin})); }catch(e){}
   if(CONFIG.paymentsEnabled){
     $('buyBtn').disabled=true; $('buyBtn').textContent='Создаём платёж…';
     try{
@@ -369,7 +371,19 @@ async function enterWorkMode(code, showCode, info){
   $('workArea').style.display='block';
   if(showCode){ $('codeBox').style.display='block'; $('codeValue').textContent=code; $('codeVideoWrap').style.display = videoLeft>0 ? 'inline':'none'; }
   updateBalance();
-  items=[]; renderThumbs();               // чистим буфер под новый товар
+  // переносим ранее загруженную вещь и модель в рабочую зону (в т.ч. после возврата с оплаты)
+  if(!items.length){
+    try{
+      const p=JSON.parse(sessionStorage.getItem('sg_pending')||'null');
+      if(p){
+        if(Array.isArray(p.garments)) items=p.garments.map(u=>({id:idc++, dataUrl:u}));
+        if(p.mannequin && !selectedMannequin) selectedMannequin=p.mannequin;
+      }
+    }catch(e){}
+  }
+  try{ sessionStorage.removeItem('sg_pending'); }catch(e){}
+  renderThumbs();
+  if(selectedMannequin) selectMannequin(selectedMannequin);   // подсветить выбранную модель в рабочей зоне
   $('workArea').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
