@@ -23,6 +23,16 @@
              font-size:clamp(18px,5.2vw,25px);line-height:1.12;margin:0 0 14px;}
   .hero .eco .eco-sub{font-weight:600;font-size:0.72em;}
   .badges{display:flex;flex-direction:column;gap:8px;align-items:flex-start;}
+  .demo{margin-top:16px;background:#fff;border:1px solid #eadfd8;border-radius:14px;padding:10px 12px;}
+  .demo-row{display:flex;align-items:center;gap:10px;justify-content:center;}
+  .demo figure{margin:0;text-align:center;}
+  .demo .befores{width:92px;}
+  .demo .video-fig{width:172px;}
+  .demo .befores-imgs{display:flex;flex-direction:column;gap:6px;}
+  .demo .befores-imgs img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;display:block;}
+  .demo video{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;display:block;background:#eee;}
+  .demo figcaption{font-size:12px;color:#8a7f78;margin-top:5px;font-weight:700;}
+  .demo .arrow{font-size:26px;color:var(--accent);font-weight:800;flex:0 0 auto;}
   .free-badge{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;
               padding:8px 14px;font-size:14px;font-weight:800;}
 
@@ -101,6 +111,22 @@
     <div class="badges">
       <span class="free-badge">🎁 Первое фото (превью) — БЕСПЛАТНО</span>
       <span class="free-badge">🎁 Для пакетов Каталог и Профи — БОНУС — видео в HD качестве</span>
+    </div>
+    <div class="demo" id="heroDemo">
+      <div class="demo-row">
+        <figure class="befores">
+          <div class="befores-imgs">
+            <img src="/assets/before1.jpg" alt="Фото товара — рубашка" onerror="var d=document.getElementById('heroDemo'); if(d) d.style.display='none';">
+            <img src="/assets/before2.jpg" alt="Фото товара — брюки">
+          </div>
+          <figcaption>Ваши фото товара</figcaption>
+        </figure>
+        <div class="arrow">→</div>
+        <figure class="video-fig">
+          <video src="/assets/after.mp4" poster="/assets/poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
+          <figcaption>Готовое видео на модели 🎬</figcaption>
+        </figure>
+      </div>
     </div>
   </section>
 
