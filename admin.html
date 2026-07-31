@@ -107,7 +107,8 @@ async function loadAll(){
     ['Оплаченных заказов', s.paidOrders],
     ['Всего заказов', s.orders],
     ['Выдано кодов', s.codes],
-    ['Осталось генераций', s.creditsLeft],
+    ['Осталось фото', s.creditsLeft],
+    ['Осталось видео', s.videoLeft==null?'—':s.videoLeft],
   ].map(k=>`<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div></div>`).join('');
   $('testMode').value = s.testMode ? '1':'0';
   $('tryNote').textContent = `Примерка: ${s.tryonEnabled?'включена':'выключена'} · манекенов: ${s.mannequins} · оплата: ${s.paymentsReady?'подключена':'не подключена'} · БД: ${s.db}`;

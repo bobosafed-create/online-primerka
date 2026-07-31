@@ -151,13 +151,14 @@
     <div class="code-box" id="codeBox" style="display:none;">
       <div>Ваш код доступа — сохраните его:</div>
       <div class="code" id="codeValue">—</div>
-      <div class="bal">Осталось генераций: <b id="codeCredits">0</b></div>
+      <div class="bal">Осталось: 📸 <b id="codeCredits">0</b> фото<span id="codeVideoWrap"> · 🎬 <b id="codeVideos">0</b> видео</span></div>
       <small>По этому коду можно вернуться и продолжить в любой момент.</small>
     </div>
 
     <div class="card" id="genCard">
-      <h2><span class="step-num">✓</span> Создание фото в HD</h2>
-      <div class="sub">Баланс: <span class="balance-pill" id="balancePill">0 генераций</span>. Загрузите товар, выберите модель — и создайте фото в HD без водяного знака (−1 генерация).</div>
+      <h2><span class="step-num">✓</span> Создание фото / видео в HD</h2>
+      <div class="sub">Баланс: <span class="balance-pill" id="balancePill">0 фото</span> <span class="balance-pill" id="balancePillVideo" style="background:#efe8ff;color:#5b3fb0;border-color:#d6c9f5;display:none;">0 видео</span></div>
+      <div class="sub" style="margin-top:8px;">Загрузите <b>одну вещь</b> (или комплект верх+низ одного образа) и выберите модель. Для каждого товара — отдельное фото. Что не загрузите (низ, обувь) — уже надето на модель.</div>
       <div class="photo-actions">
         <button class="ovalbtn cam" onclick="pickCamera()">📷 Сделать ФОТО</button>
         <div class="or">ИЛИ</div>
@@ -165,8 +166,8 @@
       </div>
       <div class="thumbs" id="thumbs2"></div>
       <div class="manne-grid" id="manneGrid2" style="margin-top:14px;"></div>
-      <button class="btn" id="genBtn" onclick="generate('photo')" style="margin-top:14px;">📸 Создать фото в HD (−1 генерация)</button>
-      <button class="btn" id="genVideoBtn" onclick="generate('video')" style="margin-top:10px;display:none;background:#8a5cf6;box-shadow:none;">🎬 Создать видео (−1 генерация)</button>
+      <button class="btn" id="genBtn" onclick="generate('photo')" style="margin-top:14px;">📸 Создать фото в HD (−1 фото)</button>
+      <button class="btn" id="genVideoBtn" onclick="generate('video')" style="margin-top:10px;display:none;background:#8a5cf6;box-shadow:none;">🎬 Создать видео (−1 видео)</button>
       <div class="err" id="genErr"></div>
       <div class="progress" id="genProgress" style="display:none;"><div class="spinner"></div><div id="genProgressText">Готовим…</div></div>
       <div class="result" id="genResult" style="display:none;">
@@ -192,6 +193,7 @@ let selectedMannequin = null;
 let selectedPackage = null;
 let currentCode = null;
 let creditsLeft = 0;
+let videoLeft = 0;
 let hasVideo = false;
 const $ = id => document.getElementById(id);
 const MAX_ITEMS = 8;
@@ -302,7 +304,8 @@ function renderPackages(){
     const d=document.createElement('div'); d.className='pkg'; d.dataset.id=p.id;
     const best = p.id==='catalog' ? '<span class="best">выгодно</span>' : '';
     const per = p.count>1 ? `≈ ${Math.round(Number(p.price)/p.count)} ₽ за фото` : 'разовая генерация';
-    d.innerHTML=`<div><div class="t">📦 ${p.title}${best}</div><div class="d">${per}${p.video?' · включено видео':''}</div></div>
+    const vid = (p.videos>0) ? ` · 🎬 ${p.videos} видео` : '';
+    d.innerHTML=`<div><div class="t">📦 ${p.title}${best}</div><div class="d">${per}${vid}</div></div>
                  <div class="p">${fmt(p.price)} ₽</div>`;
     d.onclick=()=>selectPackage(p.id);
     grid.appendChild(d);
@@ -359,24 +362,27 @@ async function applyCode(){
 
 async function enterWorkMode(code, showCode, info){
   currentCode=code;
-  if(!info){ try{ info=await (await fetch('/api/code/'+encodeURIComponent(code))).json(); }catch(e){ info={creditsLeft:0,hasVideo:false}; } }
-  creditsLeft=info.creditsLeft||0; hasVideo=!!info.hasVideo;
+  if(!info){ try{ info=await (await fetch('/api/code/'+encodeURIComponent(code))).json(); }catch(e){ info={creditsLeft:0,videoLeft:0}; } }
+  creditsLeft=info.creditsLeft||0; videoLeft=info.videoLeft||0; hasVideo=videoLeft>0;
   // прячем шаги покупки, показываем рабочую зону
   ['card1','card2','card3','card4'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
   $('workArea').style.display='block';
-  if(showCode){ $('codeBox').style.display='block'; $('codeValue').textContent=code; $('codeCredits').textContent=creditsLeft; }
+  if(showCode){ $('codeBox').style.display='block'; $('codeValue').textContent=code; $('codeVideoWrap').style.display = videoLeft>0 ? 'inline':'none'; }
   updateBalance();
   items=[]; renderThumbs();               // чистим буфер под новый товар
-  $('genVideoBtn').style.display = hasVideo ? 'block':'none';
   $('workArea').scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 function updateBalance(){
-  $('balancePill').textContent = creditsLeft+' генераций';
+  $('balancePill').textContent = creditsLeft+' фото';
   $('codeCredits').textContent = creditsLeft;
-  const out = creditsLeft<=0;
-  $('genBtn').disabled=out; $('genVideoBtn').disabled=out;
-  if(out){ $('genErr').textContent='Генерации закончились. Купите новый пакет (обновите страницу).'; }
+  $('codeVideos').textContent = videoLeft;
+  $('codeVideoWrap').style.display = videoLeft>0 ? 'inline':'none';
+  const pv=$('balancePillVideo'); pv.textContent = videoLeft+' видео'; pv.style.display = videoLeft>0 ? 'inline-block':'none';
+  $('genBtn').disabled = creditsLeft<=0;
+  $('genVideoBtn').style.display = videoLeft>0 ? 'block':'none';
+  $('genVideoBtn').disabled = videoLeft<=0;
+  if(creditsLeft<=0 && videoLeft<=0){ $('genErr').textContent='Генерации закончились. Купите новый пакет (обновите страницу).'; }
 }
 
 /* ---------- Генерация в HD (списание) ---------- */
@@ -385,7 +391,8 @@ async function generate(kind){
   if(!currentCode){ $('genErr').textContent='Нет кода доступа.'; return; }
   if(!selectedMannequin){ $('genErr').textContent='Выберите модель.'; return; }
   if(!items.length){ $('genErr').textContent='Добавьте фото товара.'; return; }
-  if(creditsLeft<=0){ $('genErr').textContent='Генерации закончились.'; return; }
+  if(kind==='video' && videoLeft<=0){ $('genErr').textContent='Видео в вашем пакете закончились.'; return; }
+  if(kind==='photo' && creditsLeft<=0){ $('genErr').textContent='Фото-генерации закончились.'; return; }
   $('genBtn').disabled=true; $('genVideoBtn').disabled=true;
   $('genProgress').style.display='block'; $('genResult').style.display='none';
   $('genProgressText').textContent = kind==='video' ? 'Готовим видео… 2–4 минуты.' : 'Готовим фото в HD… до минуты.';
@@ -393,14 +400,17 @@ async function generate(kind){
     const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({code:currentCode,mannequin:selectedMannequin,kind:kind,garments:garments()})});
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
-    const d=await r.json(); creditsLeft=d.creditsLeft; updateBalance();
+    const d=await r.json();
+    if(typeof d.photoLeft==='number') creditsLeft=d.photoLeft;
+    if(typeof d.videoLeft==='number') videoLeft=d.videoLeft;
+    updateBalance();
     pollTask(d.task_id, kind==='video'?100:40, (res)=>{
       $('genProgress').style.display='none'; $('genResult').style.display='block';
       const vid=$('genVideo'), im=$('genImg');
       if((res.kind||kind)==='video'){ im.style.display='none'; vid.style.display='block'; vid.src=res.url; $('genDl').setAttribute('download','styleglobe.mp4'); }
       else { vid.style.display='none'; im.style.display='block'; im.src=res.url; $('genDl').setAttribute('download','styleglobe-hd.jpg'); }
       $('genDl').href=res.url;
-      $('genBtn').disabled=creditsLeft<=0; $('genVideoBtn').disabled=creditsLeft<=0;
+      updateBalance();
       $('genResult').scrollIntoView({behavior:'smooth',block:'start'});
     },(err)=>{ $('genProgress').style.display='none'; $('genErr').textContent='Не удалось: '+err; updateBalance(); });
   }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }

@@ -54,10 +54,10 @@ TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
 
 # Пакеты (цены и число генераций). Менять можно здесь.
 PACKAGES = [
-    {"id": "test",    "title": "1 фото (Тест)",            "count": 1,  "price": "99.00",   "video": False},
-    {"id": "start",   "title": "10 фото (Старт)",          "count": 10, "price": "990.00",  "video": False},
-    {"id": "catalog", "title": "25 фото + видео (Каталог)", "count": 25, "price": "2490.00", "video": True},
-    {"id": "pro",     "title": "50 фото (Профи)",          "count": 50, "price": "3990.00", "video": False},
+    {"id": "test",    "title": "1 фото (Тест)",               "count": 1,  "videos": 0,  "price": "99.00",   "video": False},
+    {"id": "start",   "title": "10 фото (Старт)",             "count": 10, "videos": 0,  "price": "990.00",  "video": False},
+    {"id": "catalog", "title": "25 фото + 10 видео (Каталог)", "count": 25, "videos": 10, "price": "2490.00", "video": True},
+    {"id": "pro",     "title": "50 фото + 30 видео (Профи)",   "count": 50, "videos": 30, "price": "3990.00", "video": True},
 ]
 PACKAGE_BY_ID = {p["id"]: p for p in PACKAGES}
 
@@ -116,7 +116,15 @@ def init_db():
                     credits_total INTEGER NOT NULL DEFAULT 0,
                     credits_left INTEGER NOT NULL DEFAULT 0,
                     has_video INTEGER NOT NULL DEFAULT 0,
+                    video_total INTEGER NOT NULL DEFAULT 0,
+                    video_left INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT )""")
+        # миграция для уже созданной таблицы (добавляем видео-колонки, если их нет)
+        for col in ("video_total", "video_left"):
+            try:
+                dbrun(f"ALTER TABLE codes ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
+            except Exception:
+                pass
         dbrun("""CREATE TABLE IF NOT EXISTS orders(
                     order_id TEXT PRIMARY KEY,
                     package TEXT,
@@ -173,10 +181,12 @@ def new_code():
     return f"SG-{part()}-{part()}"
 
 
-def create_code(package, count, has_video):
+def create_code(package, count, videos):
     code = new_code()
-    dbrun("INSERT INTO codes(code,package,credits_total,credits_left,has_video,created_at) "
-          "VALUES(?,?,?,?,?,?)", (code, package, count, count, 1 if has_video else 0, now_iso()))
+    videos = int(videos or 0)
+    dbrun("INSERT INTO codes(code,package,credits_total,credits_left,has_video,video_total,video_left,created_at) "
+          "VALUES(?,?,?,?,?,?,?,?)",
+          (code, package, count, count, 1 if videos > 0 else 0, videos, videos, now_iso()))
     return code
 
 
@@ -186,11 +196,19 @@ def get_code(code):
 
 
 def spend_credit(code):
-    """Атомарно списывает 1 генерацию, если баланс > 0. Возвращает остаток или None."""
+    """Атомарно списывает 1 фото-генерацию, если баланс > 0. Возвращает остаток или None."""
     code = (code or "").strip().upper()
     dbrun("UPDATE codes SET credits_left = credits_left - 1 WHERE code=? AND credits_left > 0", (code,))
     row = get_code(code)
     return row["credits_left"] if row else None
+
+
+def spend_video(code):
+    """Атомарно списывает 1 видео-генерацию, если видео-баланс > 0. Возвращает остаток или None."""
+    code = (code or "").strip().upper()
+    dbrun("UPDATE codes SET video_left = video_left - 1 WHERE code=? AND video_left > 0", (code,))
+    row = get_code(code)
+    return row.get("video_left") if row else None
 
 
 # ---------------------------------------------------------------- Манекены ----
@@ -515,7 +533,7 @@ def _issue_code_for_order(order):
     pkg = PACKAGE_BY_ID.get(order["package"])
     if not pkg:
         return None
-    code = create_code(pkg["id"], pkg["count"], pkg["video"])
+    code = create_code(pkg["id"], pkg["count"], pkg["videos"])
     dbrun("UPDATE orders SET code=? WHERE order_id=?", (code, order["order_id"]))
     return code
 
@@ -551,7 +569,8 @@ def code_info(code: str):
     if not row:
         return {"valid": False}
     return {"valid": True, "creditsLeft": row["credits_left"], "creditsTotal": row["credits_total"],
-            "hasVideo": bool(row["has_video"]), "package": row["package"]}
+            "videoLeft": int(row.get("video_left") or 0), "videoTotal": int(row.get("video_total") or 0),
+            "hasVideo": int(row.get("video_left") or 0) > 0, "package": row["package"]}
 
 
 # ------------------------------------------- Генерация в HD (списание кредита) -
@@ -592,17 +611,19 @@ def generate_hd(data: GenerateIn):
     row = get_code(data.code)
     if not row:
         raise HTTPException(404, "Код не найден")
-    if row["credits_left"] <= 0:
-        raise HTTPException(402, "Генерации закончились. Купите новый пакет.")
     kind = "video" if str(data.kind).lower() == "video" else "photo"
-    if kind == "video" and not row["has_video"]:
-        raise HTTPException(403, "В вашем пакете видео не входит")
     if not tryon_enabled():
         raise HTTPException(503, "Генерация не настроена")
+    if kind == "video":
+        if int(row.get("video_left") or 0) <= 0:
+            raise HTTPException(402, "Видео в этом пакете закончились или не входят.")
+    else:
+        if row["credits_left"] <= 0:
+            raise HTTPException(402, "Фото-генерации закончились. Купите новый пакет.")
     clothes = _save_garment_urls(data.garments)
     if not clothes:
         raise HTTPException(400, "Нет фото товара")
-    left = spend_credit(data.code)          # списываем ДО запуска
+    left = spend_video(data.code) if kind == "video" else spend_credit(data.code)  # списываем ДО запуска
     if left is None:
         raise HTTPException(402, "Генерации закончились")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
@@ -612,7 +633,10 @@ def generate_hd(data: GenerateIn):
     TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
     threading.Thread(target=_run_hd, args=(task_id, token, mannequin, clothes, kind),
                      daemon=True).start()
-    return {"task_id": task_id, "creditsLeft": left}
+    fresh = get_code(data.code) or {}
+    return {"task_id": task_id, "kind": kind, "creditsLeft": left,
+            "photoLeft": int(fresh.get("credits_left") or 0),
+            "videoLeft": int(fresh.get("video_left") or 0)}
 
 
 # ------------------------------------------------------------- Тест-заказ -----
@@ -628,7 +652,7 @@ def test_order(data: TestOrderIn):
     if not pkg:
         raise HTTPException(400, "Неизвестный пакет")
     order_id = uuid.uuid4().hex
-    code = create_code(pkg["id"], pkg["count"], pkg["video"])
+    code = create_code(pkg["id"], pkg["count"], pkg["videos"])
     dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,code,created_at) "
           "VALUES(?,?,?,1,1,?,?)", (order_id, pkg["id"], pkg["price"], code, now_iso()))
     return {"ok": True, "order_id": order_id, "code": code}
@@ -671,6 +695,7 @@ def admin_stats(request: Request):
             "paymentsReady": payments_ready(), "tryonEnabled": tryon_enabled(),
             "mannequins": len(available_mannequins()), "codes": len(codes),
             "creditsLeft": sum(c["credits_left"] for c in codes),
+            "videoLeft": sum(int(c.get("video_left") or 0) for c in codes),
             "db": "postgres" if USE_PG else "sqlite (ВРЕМЕННАЯ — задайте DATABASE_URL!)"}
 
 
