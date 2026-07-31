@@ -221,7 +221,7 @@ def mannequin_frame(n):
 
 
 def available_mannequins():
-    return [{"id": n} for n in (1, 2, 3) if mannequin_frame(n)]
+    return [{"id": n} for n in range(1, 9) if mannequin_frame(n)]
 
 
 def tryon_enabled():
