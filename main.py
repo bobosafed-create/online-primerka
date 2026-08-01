@@ -43,6 +43,7 @@ SITE_URL = os.getenv("SITE_URL", "https://example.twc1.net").rstrip("/")
 CURRENCY = os.getenv("CURRENCY", "RUB")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 ADMIN_TOKEN = uuid.uuid4().hex
+METRIKA_ID = os.getenv("METRIKA_ID", "").strip()   # номер счётчика Яндекс.Метрики
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
@@ -236,7 +237,16 @@ app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL, "*"],
 
 def _page(name):
     p = os.path.join(HERE, name)
-    return FileResponse(p) if os.path.exists(p) else JSONResponse({"detail": f"{name} не найден"}, status_code=404)
+    if not os.path.exists(p):
+        return JSONResponse({"detail": f"{name} не найден"}, status_code=404)
+    if name.endswith(".html"):
+        try:
+            html = open(p, encoding="utf-8").read()
+            html = html.replace("__METRIKA_ID__", METRIKA_ID or "0")
+            return Response(content=html, media_type="text/html")
+        except Exception:
+            return FileResponse(p)
+    return FileResponse(p)
 
 
 @app.get("/")
