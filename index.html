@@ -44,6 +44,13 @@
   .demo video{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;display:block;background:#eee;}
   .demo figcaption{font-size:12px;color:#8a7f78;margin-top:5px;font-weight:700;}
   .demo .arrow{font-size:26px;color:var(--accent);font-weight:800;flex:0 0 auto;}
+  .survey{margin-top:16px;background:#fff;border:1px dashed var(--line);border-radius:12px;padding:14px 16px;}
+  .survey-q{font-weight:800;font-size:15px;margin-bottom:10px;}
+  .survey-opts{display:flex;flex-direction:column;gap:8px;}
+  .survey-opts button{text-align:left;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#faf6ef;font-size:14.5px;cursor:pointer;color:var(--ink,#2b2a28);}
+  .survey-opts button:active{border-color:var(--accent);}
+  .survey-thanks{color:var(--green);font-weight:700;margin-top:8px;}
+  #surveyCommentInput{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;}
   .free-badge{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;
               padding:8px 14px;font-size:14px;font-weight:800;}
 
@@ -173,6 +180,21 @@
     <div class="result" id="previewResult" style="display:none;">
       <img id="previewImg" alt="превью">
       <div class="preview-note">Это бесплатное превью с водяным знаком. Купите пакет — и скачивайте фото в HD без знака.</div>
+    </div>
+    <div class="survey" id="survey" style="display:none;">
+      <div class="survey-q">Что вас останавливает от покупки пакета?</div>
+      <div class="survey-opts" id="surveyOpts">
+        <button onclick="sendFeedback('дорого')">Дорого</button>
+        <button onclick="sendFeedback('не уверен в качестве')">Не уверен в качестве</button>
+        <button onclick="sendFeedback('не разобрался')">Не разобрался, как купить</button>
+        <button onclick="sendFeedback('просто смотрю')">Просто смотрю</button>
+        <button onclick="sendFeedback('другое')">Другое</button>
+      </div>
+      <div id="surveyComment" style="display:none;margin-top:10px;">
+        <input type="text" id="surveyCommentInput" placeholder="Напишите, что именно (по желанию)" maxlength="500">
+        <button class="btn" style="margin-top:8px;" onclick="sendFeedbackComment()">Отправить</button>
+      </div>
+      <div class="survey-thanks" id="surveyThanks" style="display:none;">Спасибо за ответ! 🙏</div>
     </div>
   </div>
 
@@ -337,6 +359,7 @@ async function startFreePreview(){
       $('previewImg').src=(res.previewUrl||('/api/preview/'+tok))+'?t='+Date.now();
       $('previewResult').style.display='block'; $('freeBtn').disabled=false;
       goal('preview_created');
+      $('survey').style.display='block';
       $('card4').scrollIntoView({behavior:'smooth',block:'start'});
     },(err)=>{ $('freeProgress').style.display='none'; $('freeErr').textContent='Не удалось: '+err; $('freeBtn').disabled=false; });
   }catch(e){ $('freeProgress').style.display='none'; $('freeErr').textContent=String(e.message||'ошибка'); $('freeBtn').disabled=false; }
@@ -475,6 +498,26 @@ async function generate(kind){
       $('genResult').scrollIntoView({behavior:'smooth',block:'start'});
     },(err)=>{ $('genProgress').style.display='none'; $('genErr').textContent='Не удалось: '+err; updateBalance(); });
   }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }
+}
+
+/* ---------- Мини-опрос: что останавливает от покупки ---------- */
+function sendFeedback(reason){
+  if(reason==='другое'){ $('surveyOpts').style.display='none'; $('surveyComment').style.display='block'; return; }
+  postFeedback(reason, '');
+}
+function sendFeedbackComment(){
+  const c=($('surveyCommentInput').value||'').trim();
+  postFeedback('другое', c);
+}
+async function postFeedback(reason, comment){
+  try{
+    await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({reason:reason, comment:comment, visitorId:visitorId()})});
+  }catch(e){}
+  goal('feedback_sent');
+  $('surveyOpts').style.display='none';
+  $('surveyComment').style.display='none';
+  $('surveyThanks').style.display='block';
 }
 </script>
 </body>

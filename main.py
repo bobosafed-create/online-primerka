@@ -137,6 +137,12 @@ def init_db():
                     created_at TEXT )""")
         dbrun("""CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT)""")
         dbrun("""CREATE TABLE IF NOT EXISTS free_usage(visitor_id TEXT PRIMARY KEY, created_at TEXT)""")
+        dbrun("""CREATE TABLE IF NOT EXISTS feedback(
+                    id TEXT PRIMARY KEY,
+                    reason TEXT,
+                    comment TEXT,
+                    visitor_id TEXT,
+                    created_at TEXT )""")
     except Exception as e:
         print("init_db warning:", e)
 
@@ -272,6 +278,32 @@ def p_kontakty():
 @app.get("/admin")
 def p_admin():
     return _page("admin.html")
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin\n"
+        "Disallow: /api/\n"
+        f"Sitemap: {SITE_URL}/sitemap.xml\n"
+    )
+    return Response(content=body, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f'  <url><loc>{SITE_URL}/</loc></url>\n'
+        f'  <url><loc>{SITE_URL}/oferta</loc></url>\n'
+        f'  <url><loc>{SITE_URL}/politika</loc></url>\n'
+        f'  <url><loc>{SITE_URL}/kontakty</loc></url>\n'
+        '</urlset>\n'
+    )
+    return Response(content=body, media_type="application/xml")
 
 
 @app.get("/health")
@@ -649,6 +681,25 @@ def generate_hd(data: GenerateIn):
             "videoLeft": int(fresh.get("video_left") or 0)}
 
 
+# -------------------------------------------------------------- Обратная связь -
+class FeedbackIn(BaseModel):
+    reason: str
+    comment: Optional[str] = ""
+    visitorId: Optional[str] = ""
+
+
+@app.post("/api/feedback")
+def submit_feedback(data: FeedbackIn):
+    reason = (data.reason or "").strip()[:60]
+    if not reason:
+        raise HTTPException(400, "Пустой ответ")
+    comment = (data.comment or "").strip()[:500]
+    vid = (data.visitorId or "").strip()[:80]
+    dbrun("INSERT INTO feedback(id,reason,comment,visitor_id,created_at) VALUES(?,?,?,?,?)",
+          (uuid.uuid4().hex, reason, comment, vid, now_iso()))
+    return {"ok": True}
+
+
 # ------------------------------------------------------------- Тест-заказ -----
 class TestOrderIn(BaseModel):
     package: str
@@ -713,6 +764,16 @@ def admin_stats(request: Request):
 def admin_orders(request: Request):
     require_admin(request)
     return {"orders": (dbrun("SELECT * FROM orders ORDER BY created_at DESC", (), "all") or [])[:200]}
+
+
+@app.get("/api/admin/feedback")
+def admin_feedback(request: Request):
+    require_admin(request)
+    rows = dbrun("SELECT * FROM feedback ORDER BY created_at DESC", (), "all") or []
+    counts = {}
+    for r in rows:
+        counts[r["reason"]] = counts.get(r["reason"], 0) + 1
+    return {"total": len(rows), "counts": counts, "items": rows[:200]}
 
 
 @app.post("/api/admin/settings")

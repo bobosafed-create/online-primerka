@@ -69,6 +69,13 @@
       <tbody></tbody>
     </table>
     <p class="muted" id="tryNote" style="margin-top:14px;"></p>
+
+    <h1 style="font-size:16px;">Опрос: что останавливает от покупки</h1>
+    <div class="grid" id="fbCounts"></div>
+    <table id="fbTable">
+      <thead><tr><th>Дата</th><th>Ответ</th><th>Комментарий</th></tr></thead>
+      <tbody></tbody>
+    </table>
   </div>
 </div>
 
@@ -121,6 +128,16 @@ async function loadAll(){
     <td>${x.paid?'✅':'—'}</td>
     <td>${x.code||''}</td>
     <td>${x.is_test?'тест':''}</td></tr>`).join('') || '<tr><td colspan=6 class="muted">Заказов пока нет</td></tr>';
+
+  const fb = await api('/api/admin/feedback');
+  $('fbCounts').innerHTML = Object.keys(fb.counts||{}).length
+    ? Object.entries(fb.counts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="kpi"><div class="v">${v}</div><div class="l">${k}</div></div>`).join('')
+    : '<div class="muted">Ответов пока нет</div>';
+  const fbtb = document.querySelector('#fbTable tbody');
+  fbtb.innerHTML = (fb.items||[]).map(x=>`<tr>
+    <td>${(x.created_at||'').replace('T',' ').slice(0,19)}</td>
+    <td>${x.reason||''}</td>
+    <td>${(x.comment||'').replace(/</g,'&lt;')}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">Ответов пока нет</td></tr>';
 }
 
 async function saveSettings(){
