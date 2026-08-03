@@ -499,7 +499,8 @@ def _run_free_preview(task_id, token, mannequin, clothes, vid):
         hd = os.path.join(IMG_DIR, f"prev_{token}.jpg")
         _download_to(url, hd)
         make_transparent_watermark(hd, os.path.join(IMG_DIR, f"prevwm_{token}.jpg"))
-        mark_free_used(vid)
+        if not test_mode():
+            mark_free_used(vid)
         TASKS[task_id] = {"status": "done", "token": token, "error": None,
                           "previewUrl": f"/api/preview/{token}"}
     except Exception as e:
@@ -511,7 +512,7 @@ def free_preview(data: FreePreviewIn):
     if not tryon_enabled():
         raise HTTPException(503, "Генерация не настроена (нет ключа WaveSpeed или манекенов)")
     vid = (data.visitorId or "").strip()[:64]
-    if vid and has_used_free(vid):
+    if vid and has_used_free(vid) and not test_mode():
         raise HTTPException(429, "Бесплатное превью уже использовано. Купите пакет, чтобы создавать фото в HD.")
     clothes = _save_garment_urls(data.garments)
     if not clothes:
