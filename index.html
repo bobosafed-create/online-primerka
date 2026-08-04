@@ -52,7 +52,20 @@
   .survey-thanks{color:var(--green);font-weight:700;margin-top:8px;}
   #surveyCommentInput{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;}
   .demo img,.demo video{cursor:zoom-in;}
-  .demo .zoom-hint{font-size:11px;color:#a89f97;text-align:center;margin-top:6px;}
+  .demo .zoom-hint{font-size:13.5px;color:#8a7f78;font-weight:700;text-align:center;margin-top:10px;}
+  .gallery{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .gallery::-webkit-scrollbar{display:none;}
+  .look{scroll-snap-align:center;flex:0 0 100%;box-sizing:border-box;}
+  .look-label{font-size:12.5px;color:#8a7f78;font-weight:700;margin:0 0 7px;}
+  .look-items{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;}
+  .look-items::-webkit-scrollbar{display:none;}
+  .look-items img{width:60px;height:60px;flex:0 0 auto;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line);}
+  .look-arrow{text-align:center;font-size:22px;color:var(--accent);font-weight:800;margin:6px 0;}
+  .look video{width:100%;max-width:240px;aspect-ratio:1/1;object-fit:cover;border-radius:12px;display:block;margin:0 auto;cursor:zoom-in;background:#eee;}
+  .look-vidcap{font-size:12.5px;color:#8a7f78;font-weight:700;text-align:center;margin-top:7px;}
+  .gallery-dots{display:flex;gap:7px;justify-content:center;margin-top:10px;}
+  .gallery-dots span{width:8px;height:8px;border-radius:50%;background:#d8cfbc;transition:background .2s;}
+  .gallery-dots span.on{background:var(--accent);}
   .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.93);display:none;align-items:center;justify-content:center;z-index:9999;padding:14px;}
   .lightbox.open{display:flex;}
   .lightbox img,.lightbox video{max-width:100%;max-height:92vh;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
@@ -137,20 +150,8 @@
       <span class="free-badge">🎁 Для пакетов Каталог и Профи — БОНУС — видео в HD качестве</span>
     </div>
     <div class="demo" id="heroDemo">
-      <div class="demo-row">
-        <figure class="befores">
-          <div class="befores-imgs">
-            <img src="/assets/before1.jpg" alt="Фото товара — рубашка" onclick="openLB('img','/assets/before1.jpg')" onerror="var d=document.getElementById('heroDemo'); if(d) d.style.display='none';">
-            <img src="/assets/before2.jpg" alt="Фото товара — брюки" onclick="openLB('img','/assets/before2.jpg')">
-          </div>
-          <figcaption>Ваши фото товара</figcaption>
-        </figure>
-        <div class="arrow">→</div>
-        <figure class="video-fig">
-          <video src="/assets/after.mp4" poster="/assets/poster.jpg" autoplay muted loop playsinline preload="metadata" onclick="openLB('video','/assets/after.mp4')"></video>
-          <figcaption>Готовое видео на модели 🎬</figcaption>
-        </figure>
-      </div>
+      <div class="gallery" id="gallery"></div>
+      <div class="gallery-dots" id="galleryDots"></div>
       <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
     </div>
   </section>
@@ -513,6 +514,45 @@ async function generate(kind){
   }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }
 }
 
+/* ---------- Галерея примеров (образы: вещи → видео на модели) ---------- */
+const LOOKS = [
+  {items:['/assets/before1.jpg','/assets/before2.jpg'], video:'/assets/after.mp4', poster:'/assets/poster.jpg'},
+  {items:['/assets/look1_b1.jpg','/assets/look1_b2.jpg','/assets/look1_b3.jpg','/assets/look1_b4.jpg','/assets/look1_b5.jpg'], video:'/assets/look1_after.mp4', poster:'/assets/look1_poster.jpg'},
+  {items:['/assets/look2_b1.jpg','/assets/look2_b2.jpg','/assets/look2_b3.jpg','/assets/look2_b4.jpg','/assets/look2_b5.jpg'], video:'/assets/look2_after.mp4', poster:'/assets/look2_poster.jpg'}
+];
+function renderGallery(){
+  const g=$('gallery'); if(!g) return;
+  g.innerHTML = LOOKS.map((L,i)=>{
+    const thumbs = L.items.map((src,j)=>{
+      const oe = (i===0&&j===0) ? ` onerror="var d=document.getElementById('heroDemo'); if(d) d.style.display='none';"` : '';
+      return `<img src="${src}" alt="вещь" onclick="openLB('img','${src}')"${oe}>`;
+    }).join('');
+    return `<div class="look">
+      <div class="look-label">Загрузите ваши вещи:</div>
+      <div class="look-items">${thumbs}</div>
+      <div class="look-arrow">↓</div>
+      <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
+      <div class="look-vidcap">Готовое видео на модели 🎬</div>
+    </div>`;
+  }).join('');
+  const dots=$('galleryDots');
+  if(dots){ dots.innerHTML = LOOKS.map((_,i)=>`<span class="${i===0?'on':''}"></span>`).join(''); }
+  const vids = g.querySelectorAll('video');
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver((ents)=>{
+      ents.forEach(e=>{ const v=e.target;
+        if(e.isIntersecting && e.intersectionRatio>0.6){ try{v.play();}catch(_){} }
+        else { try{v.pause();}catch(_){} }
+      });
+    },{threshold:[0,0.6,1]});
+    vids.forEach(v=>io.observe(v));
+  } else if(vids[0]){ try{vids[0].play();}catch(_){} }
+  g.addEventListener('scroll', ()=>{
+    const idx = Math.round(g.scrollLeft / g.clientWidth);
+    if(dots) dots.querySelectorAll('span').forEach((s,i)=>s.classList.toggle('on', i===idx));
+  });
+}
+
 /* ---------- Лайтбокс: увеличение фото/видео на весь экран ---------- */
 function openLB(kind, src){
   const lb=$('lightbox'), im=$('lbImg'), vd=$('lbVideo');
@@ -551,6 +591,8 @@ async function postFeedback(reason, comment){
   $('surveyComment').style.display='none';
   $('surveyThanks').style.display='block';
 }
+
+renderGallery();   // построить галерею примеров (независимо от конфигурации)
 </script>
 </body>
 </html>
