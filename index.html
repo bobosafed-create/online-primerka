@@ -60,7 +60,8 @@
   .look-items{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;}
   .look-items::-webkit-scrollbar{display:none;}
   .look-items img{width:60px;height:60px;flex:0 0 auto;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line);}
-  .look-arrow{text-align:center;font-size:22px;color:var(--accent);font-weight:800;margin:6px 0;}
+  .look-arrow{position:relative;text-align:center;font-size:22px;color:var(--accent);font-weight:800;margin:6px 0;}
+  .swipe-hint{position:absolute;right:2px;top:50%;transform:translateY(-50%);font-size:12.5px;color:var(--accent);font-weight:800;white-space:nowrap;}
   .look video{width:100%;max-width:240px;aspect-ratio:1/1;object-fit:cover;border-radius:12px;display:block;margin:0 auto;cursor:zoom-in;background:#eee;}
   .look-vidcap{font-size:12.5px;color:#8a7f78;font-weight:700;text-align:center;margin-top:7px;}
   .gallery-dots{display:flex;gap:7px;justify-content:center;margin-top:10px;}
@@ -516,7 +517,7 @@ async function generate(kind){
 
 /* ---------- Галерея примеров (образы: вещи → видео на модели) ---------- */
 const LOOKS = [
-  {items:['/assets/before1.jpg','/assets/before2.jpg'], video:'/assets/after.mp4', poster:'/assets/poster.jpg'},
+  {items:['/assets/before1.jpg','/assets/before2.jpg','/assets/before3.jpg','/assets/before4.jpg','/assets/before5.jpg'], video:'/assets/after.mp4', poster:'/assets/poster.jpg'},
   {items:['/assets/look1_b1.jpg','/assets/look1_b2.jpg','/assets/look1_b3.jpg','/assets/look1_b4.jpg','/assets/look1_b5.jpg'], video:'/assets/look1_after.mp4', poster:'/assets/look1_poster.jpg'},
   {items:['/assets/look2_b1.jpg','/assets/look2_b2.jpg','/assets/look2_b3.jpg','/assets/look2_b4.jpg','/assets/look2_b5.jpg'], video:'/assets/look2_after.mp4', poster:'/assets/look2_poster.jpg'}
 ];
@@ -530,7 +531,7 @@ function renderGallery(){
     return `<div class="look">
       <div class="look-label">Загрузите ваши вещи:</div>
       <div class="look-items">${thumbs}</div>
-      <div class="look-arrow">↓</div>
+      <div class="look-arrow">↓${ i<LOOKS.length-1 ? '<span class="swipe-hint">ещё образы →</span>' : '' }</div>
       <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
       <div class="look-vidcap">Готовое видео на модели 🎬</div>
     </div>`;
