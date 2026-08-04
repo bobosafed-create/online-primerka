@@ -51,6 +51,12 @@
   .survey-opts button:active{border-color:var(--accent);}
   .survey-thanks{color:var(--green);font-weight:700;margin-top:8px;}
   #surveyCommentInput{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;}
+  .demo img,.demo video{cursor:zoom-in;}
+  .demo .zoom-hint{font-size:11px;color:#a89f97;text-align:center;margin-top:6px;}
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.93);display:none;align-items:center;justify-content:center;z-index:9999;padding:14px;}
+  .lightbox.open{display:flex;}
+  .lightbox img,.lightbox video{max-width:100%;max-height:92vh;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  .lightbox .lb-close{position:absolute;top:12px;right:18px;color:#fff;font-size:38px;line-height:1;font-weight:700;cursor:pointer;}
   .free-badge{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;
               padding:8px 14px;font-size:14px;font-weight:800;}
 
@@ -134,17 +140,18 @@
       <div class="demo-row">
         <figure class="befores">
           <div class="befores-imgs">
-            <img src="/assets/before1.jpg" alt="Фото товара — рубашка" onerror="var d=document.getElementById('heroDemo'); if(d) d.style.display='none';">
-            <img src="/assets/before2.jpg" alt="Фото товара — брюки">
+            <img src="/assets/before1.jpg" alt="Фото товара — рубашка" onclick="openLB('img','/assets/before1.jpg')" onerror="var d=document.getElementById('heroDemo'); if(d) d.style.display='none';">
+            <img src="/assets/before2.jpg" alt="Фото товара — брюки" onclick="openLB('img','/assets/before2.jpg')">
           </div>
           <figcaption>Ваши фото товара</figcaption>
         </figure>
         <div class="arrow">→</div>
         <figure class="video-fig">
-          <video src="/assets/after.mp4" poster="/assets/poster.jpg" autoplay muted loop playsinline preload="metadata"></video>
+          <video src="/assets/after.mp4" poster="/assets/poster.jpg" autoplay muted loop playsinline preload="metadata" onclick="openLB('video','/assets/after.mp4')"></video>
           <figcaption>Готовое видео на модели 🎬</figcaption>
         </figure>
       </div>
+      <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
     </div>
   </section>
 
@@ -250,6 +257,12 @@
     <a href="/politika" target="_blank">Конфиденциальность</a>·
     <a href="/kontakty" target="_blank">Контакты</a>
   </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLB()">
+  <span class="lb-close" onclick="closeLB()">×</span>
+  <img id="lbImg" style="display:none;" alt="" onclick="event.stopPropagation()">
+  <video id="lbVideo" style="display:none;" controls loop playsinline onclick="event.stopPropagation()"></video>
 </div>
 
 <script>
@@ -498,6 +511,25 @@ async function generate(kind){
       $('genResult').scrollIntoView({behavior:'smooth',block:'start'});
     },(err)=>{ $('genProgress').style.display='none'; $('genErr').textContent='Не удалось: '+err; updateBalance(); });
   }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }
+}
+
+/* ---------- Лайтбокс: увеличение фото/видео на весь экран ---------- */
+function openLB(kind, src){
+  const lb=$('lightbox'), im=$('lbImg'), vd=$('lbVideo');
+  if(kind==='video'){
+    im.style.display='none';
+    vd.src=src; vd.style.display='block'; vd.muted=false;
+    try{ vd.currentTime=0; vd.play(); }catch(e){}
+  } else {
+    vd.pause(); vd.style.display='none';
+    im.src=src; im.style.display='block';
+  }
+  lb.classList.add('open');
+}
+function closeLB(){
+  const lb=$('lightbox'), vd=$('lbVideo');
+  lb.classList.remove('open');
+  try{ vd.pause(); }catch(e){}
 }
 
 /* ---------- Мини-опрос: что останавливает от покупки ---------- */
