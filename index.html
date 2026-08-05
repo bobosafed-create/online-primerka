@@ -61,7 +61,7 @@
   .look-items::-webkit-scrollbar{display:none;}
   .look-items img{width:60px;height:60px;flex:0 0 auto;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line);}
   .look-arrow{position:relative;text-align:center;font-size:22px;color:var(--accent);font-weight:800;margin:6px 0;}
-  .swipe-hint{position:absolute;right:2px;top:50%;transform:translateY(-50%);font-size:12.5px;color:var(--accent);font-weight:800;white-space:nowrap;}
+  .swipe-hint{position:absolute;right:2px;top:50%;transform:translateY(-50%);font-size:12.5px;color:var(--accent);font-weight:800;white-space:nowrap;cursor:pointer;}
   .look video{width:100%;max-width:240px;aspect-ratio:1/1;object-fit:cover;border-radius:12px;display:block;margin:0 auto;cursor:zoom-in;background:#eee;}
   .look-vidcap{font-size:12.5px;color:#8a7f78;font-weight:700;text-align:center;margin-top:7px;}
   .gallery-dots{display:flex;gap:7px;justify-content:center;margin-top:10px;}
@@ -521,6 +521,13 @@ const LOOKS = [
   {items:['/assets/look1_b1.jpg','/assets/look1_b2.jpg','/assets/look1_b3.jpg','/assets/look1_b4.jpg','/assets/look1_b5.jpg'], video:'/assets/look1_after.mp4', poster:'/assets/look1_poster.jpg'},
   {items:['/assets/look2_b1.jpg','/assets/look2_b2.jpg','/assets/look2_b3.jpg','/assets/look2_b4.jpg','/assets/look2_b5.jpg'], video:'/assets/look2_after.mp4', poster:'/assets/look2_poster.jpg'}
 ];
+function scrollGallery(){
+  const g=$('gallery'); if(!g) return;
+  const looks=g.querySelectorAll('.look'); if(!looks.length) return;
+  const cur=Math.round(g.scrollLeft/g.clientWidth);
+  const next=(cur+1)%looks.length;
+  g.scrollTo({left: looks[next].offsetLeft, behavior:'smooth'});
+}
 function renderGallery(){
   const g=$('gallery'); if(!g) return;
   g.innerHTML = LOOKS.map((L,i)=>{
@@ -531,7 +538,7 @@ function renderGallery(){
     return `<div class="look">
       <div class="look-label">Загрузите ваши вещи:</div>
       <div class="look-items">${thumbs}</div>
-      <div class="look-arrow">↓${ i<LOOKS.length-1 ? '<span class="swipe-hint">ещё образы →</span>' : '' }</div>
+      <div class="look-arrow">↓${ i<LOOKS.length-1 ? '<span class="swipe-hint" onclick="event.stopPropagation(); scrollGallery()">ещё образы →</span>' : '' }</div>
       <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
       <div class="look-vidcap">Готовое видео на модели 🎬</div>
     </div>`;
