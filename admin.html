@@ -13,7 +13,6 @@
   .login{max-width:340px; margin:60px auto; background:#1c1e26; padding:24px; border-radius:14px;}
   input,select{width:100%; padding:12px; border-radius:10px; border:1px solid #333; background:#0f1014; color:#fff; font-size:15px;}
   .btn{width:100%; margin-top:12px; padding:12px; border:none; border-radius:10px; background:#e5395b; color:#fff; font-weight:700; font-size:15px; cursor:pointer;}
-  .btn.secondary{background:#30333d;}
   .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:22px;}
   .kpi{background:#1c1e26; border-radius:12px; padding:16px;}
   .kpi .v{font-size:22px; font-weight:800;}
@@ -43,10 +42,7 @@
   </div>
 
   <div id="panel" hidden>
-    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;">
-      <a href="/" style="color:#8ab4ff; text-decoration:none; font-size:14px;">← Вернуться на сайт</a>
-      <button class="btn secondary" style="width:auto;margin:0;padding:8px 14px;" onclick="logout()">Выйти</button>
-    </div>
+    <a href="/" style="display:inline-block; margin-bottom:12px; color:#8ab4ff; text-decoration:none; font-size:14px;">← Вернуться на сайт</a>
     <h1>StyleGlobe для селлеров — панель</h1>
 
     <div id="dbWarn" class="warn" hidden></div>
@@ -80,60 +76,55 @@
       <thead><tr><th>Дата</th><th>Ответ</th><th>Комментарий</th></tr></thead>
       <tbody></tbody>
     </table>
+
+    <h1 style="font-size:16px;">Предложения и замечания</h1>
+    <table id="sgTable">
+      <thead><tr><th>Дата</th><th>Сообщение</th><th>Контакт</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h1 style="font-size:16px;">Вопросы и ответы (публикуются на сайте)</h1>
+    <div class="row" style="flex-direction:column; align-items:stretch;">
+      <div class="field" style="flex:1 1 auto;">
+        <label>Новый вопрос</label>
+        <input type="text" id="faqQ" style="width:100%;" placeholder="Вопрос">
+      </div>
+      <div class="field" style="flex:1 1 auto; margin-top:10px;">
+        <label>Ответ</label>
+        <textarea id="faqA" rows="3" style="width:100%; padding:11px; border-radius:10px; background:#0f1014; color:#fff; border:1px solid #333; font-family:inherit;" placeholder="Ответ"></textarea>
+      </div>
+      <div class="field" style="margin-top:10px;">
+        <button class="btn" style="width:auto; padding:11px 20px;" onclick="addFaq()">Добавить на сайт</button>
+        <span id="faqMsg" class="ok" style="margin-left:10px;"></span>
+      </div>
+    </div>
+    <table id="faqTable">
+      <thead><tr><th>Вопрос</th><th>Ответ</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
   </div>
 </div>
 
 <script>
-let CSRF = null;
+let TOKEN = null;
 const $ = id => document.getElementById(id);
-
-function showLogin(){
-  CSRF=null; $('panel').hidden=true; $('loginBox').hidden=false; $('pwd').value='';
-}
-
-function showPanel(){
-  $('loginBox').hidden=true; $('panel').hidden=false;
-}
 
 async function login(){
   $('loginErr').textContent='';
   try{
     const r = await fetch('/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({password:$('pwd').value})});
-    const body=await r.json().catch(()=>({}));
-    if(!r.ok) throw new Error(body.detail||'Ошибка входа');
-    CSRF = body.csrfToken;
-    showPanel(); await loadAll();
-  }catch(e){ $('loginErr').textContent=e.message||'Неверный пароль или админка не настроена.'; }
+    if(!r.ok) throw new Error();
+    TOKEN = (await r.json()).token;
+    $('loginBox').hidden=true; $('panel').hidden=false;
+    loadAll();
+  }catch(e){ $('loginErr').textContent='Неверный пароль или админка не настроена.'; }
 }
 
 async function api(path){
-  const r = await fetch(path,{credentials:'same-origin',cache:'no-store'});
-  if(r.status===401){ showLogin(); throw new Error('Сессия завершена'); }
+  const r = await fetch(path,{headers:{'X-Admin-Token':TOKEN}});
   if(!r.ok) throw new Error(path);
   return r.json();
-}
-
-async function resumeSession(){
-  try{
-    const r=await fetch('/api/admin/session',{credentials:'same-origin',cache:'no-store'});
-    if(!r.ok){ showLogin(); return; }
-    CSRF=(await r.json()).csrfToken;
-    showPanel(); await loadAll();
-  }catch(e){ showLogin(); }
-}
-
-async function logout(){
-  try{
-    await fetch('/api/admin/logout',{method:'POST',credentials:'same-origin',
-      headers:{'X-CSRF-Token':CSRF||''}});
-  }finally{ showLogin(); }
-}
-
-function appendTextCell(row, value){
-  const cell=document.createElement('td');
-  cell.textContent=String(value==null?'':value);
-  row.appendChild(cell);
 }
 
 async function loadAll(){
@@ -165,47 +156,59 @@ async function loadAll(){
     <td>${x.is_test?'тест':''}</td></tr>`).join('') || '<tr><td colspan=6 class="muted">Заказов пока нет</td></tr>';
 
   const fb = await api('/api/admin/feedback');
-  const countsBox=$('fbCounts'); countsBox.replaceChildren();
-  const counts=Object.entries(fb.counts||{}).sort((a,b)=>b[1]-a[1]);
-  if(counts.length){
-    counts.forEach(([reason,count])=>{
-      const card=document.createElement('div'); card.className='kpi';
-      const value=document.createElement('div'); value.className='v'; value.textContent=String(count);
-      const label=document.createElement('div'); label.className='l'; label.textContent=String(reason);
-      card.append(value,label); countsBox.appendChild(card);
-    });
-  }else{
-    const empty=document.createElement('div'); empty.className='muted'; empty.textContent='Ответов пока нет';
-    countsBox.appendChild(empty);
-  }
+  $('fbCounts').innerHTML = Object.keys(fb.counts||{}).length
+    ? Object.entries(fb.counts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="kpi"><div class="v">${v}</div><div class="l">${k}</div></div>`).join('')
+    : '<div class="muted">Ответов пока нет</div>';
   const fbtb = document.querySelector('#fbTable tbody');
-  fbtb.replaceChildren();
-  (fb.items||[]).forEach(x=>{
-    const row=document.createElement('tr');
-    appendTextCell(row,(x.created_at||'').replace('T',' ').slice(0,19));
-    appendTextCell(row,x.reason||'');
-    appendTextCell(row,x.comment||'');
-    fbtb.appendChild(row);
-  });
-  if(!(fb.items||[]).length){
-    const row=document.createElement('tr'); const cell=document.createElement('td');
-    cell.colSpan=3; cell.className='muted'; cell.textContent='Ответов пока нет';
-    row.appendChild(cell); fbtb.appendChild(row);
-  }
+  fbtb.innerHTML = (fb.items||[]).map(x=>`<tr>
+    <td>${(x.created_at||'').replace('T',' ').slice(0,19)}</td>
+    <td>${x.reason||''}</td>
+    <td>${(x.comment||'').replace(/</g,'&lt;')}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">Ответов пока нет</td></tr>';
+
+  const sg = await api('/api/admin/suggestions');
+  document.querySelector('#sgTable tbody').innerHTML = (sg.items||[]).map(x=>`<tr>
+    <td>${(x.created_at||'').replace('T',' ').slice(0,19)}</td>
+    <td>${(x.message||'').replace(/</g,'&lt;')}</td>
+    <td>${(x.contact||'').replace(/</g,'&lt;')}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">Пока нет</td></tr>';
+
+  loadFaq();
+}
+
+async function loadFaq(){
+  const f = await api('/api/admin/faq');
+  document.querySelector('#faqTable tbody').innerHTML = (f.items||[]).map(x=>`<tr>
+    <td>${(x.question||'').replace(/</g,'&lt;')}</td>
+    <td>${(x.answer||'').replace(/</g,'&lt;')}</td>
+    <td><button class="btn" style="width:auto;padding:6px 12px;background:#444;" onclick="delFaq('${x.id}')">Удалить</button></td></tr>`).join('')
+    || '<tr><td colspan=3 class="muted">Вопросов пока нет</td></tr>';
+}
+
+async function addFaq(){
+  $('faqMsg').textContent='';
+  const q=$('faqQ').value.trim(), a=$('faqA').value.trim();
+  if(!q || !a){ $('faqMsg').textContent='Заполните вопрос и ответ'; return; }
+  const r=await fetch('/api/admin/faq',{method:'POST',
+    headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
+    body:JSON.stringify({question:q, answer:a})});
+  if(r.ok){ $('faqQ').value=''; $('faqA').value=''; $('faqMsg').textContent='Добавлено'; loadFaq(); }
+  else{ $('faqMsg').textContent='Ошибка'; }
+}
+
+async function delFaq(id){
+  const r=await fetch('/api/admin/faq/delete',{method:'POST',
+    headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
+    body:JSON.stringify({id:id})});
+  if(r.ok){ loadFaq(); }
 }
 
 async function saveSettings(){
   $('saveMsg').textContent='';
   const r = await fetch('/api/admin/settings',{method:'POST',
-    credentials:'same-origin',headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF||''},
+    headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
     body:JSON.stringify({test_mode: $('testMode').value==='1'})});
   if(r.ok){ $('saveMsg').textContent='Сохранено'; loadAll(); }
-  else if(r.status===401){ showLogin(); }
   else{ $('saveMsg').textContent='Ошибка'; }
 }
-
-$('pwd').addEventListener('keydown',e=>{if(e.key==='Enter') login();});
-resumeSession();
 </script>
 </body>
 </html>

@@ -1,7 +1,6 @@
-fastapi==0.141.1
-uvicorn[standard]==0.52.1
-yookassa==3.11.0
-requests==2.34.2
-Pillow==12.3.0
-psycopg2-binary==2.9.12
-boto3==1.42.48
+fastapi
+uvicorn[standard]
+yookassa
+requests
+Pillow
+psycopg2-binary

@@ -71,6 +71,14 @@
   .lightbox.open{display:flex;}
   .lightbox img,.lightbox video{max-width:100%;max-height:92vh;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
   .lightbox .lb-close{position:absolute;top:12px;right:18px;color:#fff;font-size:38px;line-height:1;font-weight:700;cursor:pointer;}
+  .faq{border-top:1px solid var(--line);padding:11px 0;}
+  .faq summary{cursor:pointer;font-weight:700;font-size:15px;color:#2b2a28;list-style:none;position:relative;padding-right:26px;}
+  .faq summary::-webkit-details-marker{display:none;}
+  .faq summary::after{content:'+';position:absolute;right:2px;top:-2px;font-size:22px;color:var(--accent);font-weight:800;}
+  .faq[open] summary::after{content:'–';}
+  .faq p{margin:8px 0 2px;color:#6b6558;font-size:14px;line-height:1.5;}
+  .sg-input{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;font-size:14.5px;font-family:inherit;box-sizing:border-box;}
+  textarea.sg-input{resize:vertical;}
   .free-badge{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;
               padding:8px 14px;font-size:14px;font-weight:800;}
 
@@ -98,10 +106,14 @@
   .btn:disabled{background:#cdc7c0;box-shadow:none;cursor:not-allowed;}
   .btn.green{background:var(--green);box-shadow:0 6px 16px rgba(57,179,106,.28);}
 
-  .manne-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:6px 0 4px;}
-  .manne{border:2px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;background:#000;aspect-ratio:3/4;}
+  .manne-grid{position:relative;margin:6px 0 4px;}
+  .mn-track{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .mn-track::-webkit-scrollbar{display:none;}
+  .manne{flex:0 0 auto;width:104px;scroll-snap-align:center;border:2px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;background:#000;aspect-ratio:3/4;}
   .manne.sel{border-color:var(--accent);box-shadow:0 0 0 3px rgba(229,57,91,.18);}
   .manne img{width:100%;height:100%;object-fit:cover;display:block;}
+  .mn-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--accent);font-size:22px;font-weight:800;line-height:30px;text-align:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.15);padding:0;}
+  .mn-arrow.left{left:-6px;} .mn-arrow.right{right:-6px;}
 
   .progress{text-align:center;padding:20px 6px;}
   .spinner{width:40px;height:40px;border:4px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 12px;animation:spin 1s linear infinite;}
@@ -254,6 +266,23 @@
     </div>
   </div>
 
+  <!-- Вопросы и ответы -->
+  <div class="card" id="faqCard" style="display:none;">
+    <h2>❓ Вопросы и ответы</h2>
+    <div id="faqList"></div>
+  </div>
+
+  <!-- Ваши предложения и замечания -->
+  <div class="card">
+    <h2>💬 Ваши предложения и замечания</h2>
+    <div class="sub">Помогите сделать сервис лучше — напишите, что понравилось или что стоит улучшить.</div>
+    <textarea id="sgMsg" class="sg-input" rows="3" placeholder="Ваше сообщение…" maxlength="1000"></textarea>
+    <input type="text" id="sgContact" class="sg-input" placeholder="Email или телефон для ответа (по желанию)" maxlength="120" style="margin-top:8px;">
+    <button class="btn" onclick="sendSuggestion()" style="margin-top:12px;">Отправить</button>
+    <div class="err" id="sgErr"></div>
+    <div class="survey-thanks" id="sgThanks" style="display:none;">Спасибо! Мы прочитаем ваше сообщение. 🙏</div>
+  </div>
+
   <div class="foot">
     <a href="/oferta" target="_blank">Оферта</a>·
     <a href="/politika" target="_blank">Конфиденциальность</a>·
@@ -333,11 +362,18 @@ function garments(){ return items.map(i=>i.dataUrl).slice(0,MAX_ITEMS); }
 function renderMannequins(){
   const list = (CONFIG.mannequins&&CONFIG.mannequins.length)?CONFIG.mannequins:[{id:1},{id:2},{id:3}];
   ['manneGrid','manneGrid2'].forEach(gid=>{
-    const grid=$(gid); if(!grid) return; grid.innerHTML='';
-    list.forEach(m=>{ const d=document.createElement('div');d.className='manne';d.dataset.id=m.id;
-      d.innerHTML=`<img src="/model/${m.id}" alt="модель ${m.id}">`;
-      d.onclick=()=>selectMannequin(m.id); grid.appendChild(d); });
+    const grid=$(gid); if(!grid) return;
+    const cards = list.map(m=>`<div class="manne" data-id="${m.id}" onclick="selectMannequin(${m.id})"><img src="/model/${m.id}" alt="модель ${m.id}"></div>`).join('');
+    grid.innerHTML =
+      `<button type="button" class="mn-arrow left" onclick="scrollManne('${gid}',-1)">‹</button>`+
+      `<div class="mn-track">${cards}</div>`+
+      `<button type="button" class="mn-arrow right" onclick="scrollManne('${gid}',1)">›</button>`;
   });
+}
+function scrollManne(gid, dir){
+  const grid=$(gid); if(!grid) return;
+  const track=grid.querySelector('.mn-track'); if(!track) return;
+  track.scrollBy({left: dir*Math.max(170, track.clientWidth*0.7), behavior:'smooth'});
 }
 function selectMannequin(id){
   selectedMannequin=id;
@@ -371,7 +407,7 @@ async function startFreePreview(){
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
     const d=await r.json(); const tok=d.token;
     pollTask(d.task_id,40,(res)=>{ $('freeProgress').style.display='none';
-      $('previewImg').src=res.previewUrl;
+      $('previewImg').src=(res.previewUrl||('/api/preview/'+tok))+'?t='+Date.now();
       $('previewResult').style.display='block'; $('freeBtn').disabled=false;
       goal('preview_created');
       $('survey').style.display='block';
@@ -515,6 +551,35 @@ async function generate(kind){
   }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }
 }
 
+/* ---------- Вопросы и ответы (из базы) ---------- */
+function escapeHtml(s){ return String(s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function renderFaq(){
+  try{
+    const d=await (await fetch('/api/faq')).json();
+    const items=d.items||[];
+    if(!items.length) return;
+    $('faqList').innerHTML = items.map(it=>
+      `<details class="faq"><summary>${escapeHtml(it.question)}</summary><p>${escapeHtml(it.answer)}</p></details>`).join('');
+    $('faqCard').style.display='block';
+  }catch(e){}
+}
+
+/* ---------- Предложения и замечания ---------- */
+async function sendSuggestion(){
+  $('sgErr').textContent='';
+  const msg=($('sgMsg').value||'').trim();
+  if(msg.length<2){ $('sgErr').textContent='Напишите сообщение.'; return; }
+  const contact=($('sgContact').value||'').trim();
+  try{
+    const r=await fetch('/api/suggestion',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:msg, contact:contact, visitorId:visitorId()})});
+    if(!r.ok) throw new Error();
+    $('sgMsg').value=''; $('sgContact').value='';
+    $('sgThanks').style.display='block';
+    goal('suggestion_sent');
+  }catch(e){ $('sgErr').textContent='Не удалось отправить. Попробуйте позже.'; }
+}
+
 /* ---------- Галерея примеров (образы: вещи → видео на модели) ---------- */
 const LOOKS = [
   {items:['/assets/before1.jpg','/assets/before2.jpg','/assets/before3.jpg','/assets/before4.jpg','/assets/before5.jpg'], video:'/assets/after.mp4', poster:'/assets/poster.jpg'},
@@ -549,16 +614,12 @@ function renderGallery(){
   if('IntersectionObserver' in window){
     const io=new IntersectionObserver((ents)=>{
       ents.forEach(e=>{ const v=e.target;
-        if(e.isIntersecting && e.intersectionRatio>0.6){
-          try{ const playPromise=v.play(); if(playPromise) playPromise.catch(()=>{}); }catch(_){}
-        }
+        if(e.isIntersecting && e.intersectionRatio>0.6){ try{v.play();}catch(_){} }
         else { try{v.pause();}catch(_){} }
       });
     },{threshold:[0,0.6,1]});
     vids.forEach(v=>io.observe(v));
-  } else if(vids[0]){
-    try{ const playPromise=vids[0].play(); if(playPromise) playPromise.catch(()=>{}); }catch(_){}
-  }
+  } else if(vids[0]){ try{vids[0].play();}catch(_){} }
   g.addEventListener('scroll', ()=>{
     const idx = Math.round(g.scrollLeft / g.clientWidth);
     if(dots) dots.querySelectorAll('span').forEach((s,i)=>s.classList.toggle('on', i===idx));
@@ -571,11 +632,7 @@ function openLB(kind, src){
   if(kind==='video'){
     im.style.display='none';
     vd.src=src; vd.style.display='block'; vd.muted=false;
-    try{
-      vd.currentTime=0;
-      const playPromise=vd.play();
-      if(playPromise) playPromise.catch(()=>{});
-    }catch(e){}
+    try{ vd.currentTime=0; vd.play(); }catch(e){}
   } else {
     vd.pause(); vd.style.display='none';
     im.src=src; im.style.display='block';
@@ -609,6 +666,7 @@ async function postFeedback(reason, comment){
 }
 
 renderGallery();   // построить галерею примеров (независимо от конфигурации)
+renderFaq();       // загрузить вопросы и ответы из базы
 </script>
 </body>
 </html>
