@@ -734,6 +734,22 @@ def _private_file_exists(kind, token):
         return False
 
 
+def _delete_private_file(kind, token):
+    path = _private_file_path(kind, token)
+    if s3_enabled():
+        key = _s3_key(kind, token)
+        if key:
+            try:
+                _s3_client().delete_object(Bucket=S3_BUCKET, Key=key)
+            except Exception:
+                pass
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
 @app.get("/api/file/{kind}/{token}")
 def serve_private_file(kind: str, token: str, exp: int, sig: str):
     if exp < int(time.time()) or not hmac.compare_digest(sig, _file_signature(kind, token, exp)):
@@ -1502,6 +1518,32 @@ def admin_stats(request: Request):
 def admin_orders(request: Request):
     require_admin(request)
     return {"orders": (dbrun("SELECT * FROM orders ORDER BY created_at DESC", (), "all") or [])[:200]}
+
+
+@app.post("/api/admin/cleanup-test-data")
+def cleanup_test_data(request: Request):
+    """Remove only staging test orders, their access codes, jobs and private media."""
+    require_admin(request, require_csrf=True)
+    if APP_ENV == "production":
+        raise HTTPException(404, "not found")
+    test_orders = dbrun("SELECT order_id,code FROM orders WHERE is_test=1", (), "all") or []
+    codes = [row.get("code") for row in test_orders if row.get("code")]
+    jobs = []
+    for code in codes:
+        jobs.extend(dbrun("SELECT kind,token FROM generation_jobs WHERE code=?", (code,), "all") or [])
+    for job in jobs:
+        kind = "preview" if job.get("kind") == "free_preview" else job.get("kind")
+        if kind in {"preview", "photo", "video"}:
+            _delete_private_file(kind, job.get("token"))
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        for code in codes:
+            cur.execute(_sql("DELETE FROM generation_jobs WHERE code=?"), (code,))
+            cur.execute(_sql("DELETE FROM codes WHERE code=?"), (code,))
+        cur.execute(_sql("DELETE FROM orders WHERE is_test=1"))
+        conn.commit()
+    return {"ok": True, "ordersDeleted": len(test_orders), "jobsDeleted": len(jobs)}
 
 
 @app.get("/api/admin/feedback")
