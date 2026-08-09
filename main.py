@@ -21,12 +21,18 @@ import time
 import secrets
 import threading
 import tempfile
-from contextlib import closing
+import hashlib
+import hmac
+import io
+import re
+from contextlib import asynccontextmanager, closing
+from decimal import Decimal, InvalidOperation
 
 import requests
+import boto3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -42,13 +48,38 @@ YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "").strip()
 SITE_URL = os.getenv("SITE_URL", "https://example.twc1.net").rstrip("/")
 CURRENCY = os.getenv("CURRENCY", "RUB")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
-ADMIN_TOKEN = uuid.uuid4().hex
+APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
+ENABLE_TEST_ORDERS = os.getenv("ENABLE_TEST_ORDERS", "0") == "1"
+TEST_ORDER_SECRET = os.getenv("TEST_ORDER_SECRET", "").strip()
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
+if APP_ENV == "production" and len(SESSION_SECRET.encode()) < 32:
+    raise RuntimeError("SESSION_SECRET must contain at least 32 bytes in production")
+if not SESSION_SECRET:
+    SESSION_SECRET = secrets.token_hex(32)
+    print("security warning: SESSION_SECRET is not configured; sessions reset on restart")
+TRUST_PROXY_HEADERS = os.getenv("TRUST_PROXY_HEADERS", "1") == "1"
+FREE_PREVIEW_IP_LIMIT = max(1, int(os.getenv("FREE_PREVIEW_IP_LIMIT", "3")))
+MAX_REQUEST_BYTES = max(1024 * 1024, int(os.getenv("MAX_REQUEST_BYTES", str(12 * 1024 * 1024))))
+MAX_IMAGE_BYTES = max(256 * 1024, int(os.getenv("MAX_IMAGE_BYTES", str(5 * 1024 * 1024))))
+MAX_IMAGE_PIXELS = max(1_000_000, int(os.getenv("MAX_IMAGE_PIXELS", "20000000")))
+MAX_IMAGE_EDGE = max(512, int(os.getenv("MAX_IMAGE_EDGE", "4096")))
+FILE_TTL_HOURS = max(1, int(os.getenv("FILE_TTL_HOURS", "24")))
+ADMIN_SESSION_HOURS = min(24 * 7, max(1, int(os.getenv("ADMIN_SESSION_HOURS", "12"))))
+MAX_RESULT_BYTES = max(5 * 1024 * 1024, int(os.getenv("MAX_RESULT_BYTES", str(100 * 1024 * 1024))))
+EMBEDDED_WORKER = os.getenv("EMBEDDED_WORKER", "1") == "1"
+WORKER_POLL_SECONDS = max(0.2, float(os.getenv("WORKER_POLL_SECONDS", "1")))
+WORKER_STALE_SECONDS = max(300, int(os.getenv("WORKER_STALE_SECONDS", "900")))
 METRIKA_ID = os.getenv("METRIKA_ID", "").strip()   # номер счётчика Яндекс.Метрики
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
 WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "").strip()
+S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "").strip()
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "").strip()
+S3_REGION = os.getenv("S3_REGION", "ru-1").strip()
 TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
 TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
@@ -67,9 +98,12 @@ if _YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
     Configuration.secret_key = YOOKASSA_SECRET_KEY
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-IMG_DIR = os.path.join(tempfile.gettempdir(), "seller_imgs")
+IMG_DIR = os.path.abspath(os.getenv("IMAGE_DIR", "").strip() or os.path.join(tempfile.gettempdir(), "seller_imgs"))
 os.makedirs(IMG_DIR, exist_ok=True)
-TASKS = {}
+LAST_FILE_CLEANUP = 0.0
+FILE_CLEANUP_LOCK = threading.Lock()
+WORKER_START_LOCK = threading.Lock()
+WORKER_THREAD = None
 
 # ------------------------------------------------------- База данных (PG/SQLite)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -109,6 +143,116 @@ def dbrun(sql, params=(), fetch=None):
         return out
 
 
+def _column_exists(table, column):
+    if USE_PG:
+        row = dbrun(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name=? AND column_name=?",
+            (table, column), "one"
+        )
+        return bool(row)
+    rows = dbrun(f"PRAGMA table_info({table})", (), "all") or []
+    return any(row.get("name") == column for row in rows)
+
+
+def _migration_done(version):
+    return bool(dbrun("SELECT 1 FROM schema_migrations WHERE version=?", (version,), "one"))
+
+
+def _mark_migration(version):
+    dbrun("INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)", (version, time.time()))
+
+
+def apply_migrations():
+    if not _migration_done(1):
+        for column in ("video_total", "video_left"):
+            if not _column_exists("codes", column):
+                dbrun(f"ALTER TABLE codes ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists("codes", "order_id"):
+            dbrun("ALTER TABLE codes ADD COLUMN order_id TEXT")
+        dbrun("CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_order_id ON codes(order_id)")
+        dbrun("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id)")
+        _mark_migration(1)
+
+    if not _migration_done(2):
+        dbrun("""CREATE TABLE IF NOT EXISTS free_preview_usage(
+                    session_hash TEXT PRIMARY KEY,
+                    ip_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    updated_at DOUBLE PRECISION NOT NULL )""")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_free_preview_ip ON free_preview_usage(ip_hash,created_at)")
+        dbrun("""CREATE TABLE IF NOT EXISTS generation_jobs(
+                    job_id TEXT PRIMARY KEY,
+                    code TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    finished_at DOUBLE PRECISION,
+                    error TEXT )""")
+        _mark_migration(2)
+
+    if not _migration_done(3):
+        dbrun("""CREATE TABLE IF NOT EXISTS admin_sessions(
+                    session_hash TEXT PRIMARY KEY,
+                    csrf_hash TEXT NOT NULL,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    expires_at DOUBLE PRECISION NOT NULL,
+                    last_seen DOUBLE PRECISION NOT NULL,
+                    ip_hash TEXT NOT NULL,
+                    user_agent_hash TEXT NOT NULL )""")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at)")
+        dbrun("""CREATE TABLE IF NOT EXISTS rate_limits(
+                    bucket_key TEXT NOT NULL,
+                    window_start BIGINT NOT NULL,
+                    hits INTEGER NOT NULL,
+                    updated_at DOUBLE PRECISION NOT NULL,
+                    PRIMARY KEY(bucket_key,window_start) )""")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_rate_limits_updated ON rate_limits(updated_at)")
+        _mark_migration(3)
+
+    if not _migration_done(4):
+        job_columns = {
+            "token": "TEXT",
+            "mannequin": "INTEGER",
+            "clothes_json": "TEXT",
+            "session_hash": "TEXT",
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+            "available_at": "DOUBLE PRECISION",
+            "started_at": "DOUBLE PRECISION",
+            "heartbeat_at": "DOUBLE PRECISION",
+            "worker_id": "TEXT",
+        }
+        for column, definition in job_columns.items():
+            if not _column_exists("generation_jobs", column):
+                dbrun(f"ALTER TABLE generation_jobs ADD COLUMN {column} {definition}")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_generation_jobs_queue "
+              "ON generation_jobs(status,available_at,created_at)")
+        _mark_migration(4)
+
+    if not _migration_done(5):
+        # PostgreSQL REAL is a 4-byte float. Unix timestamps near 1.8e9 then
+        # have a resolution of roughly two minutes, which can postpone a job
+        # that was just queued. Keep epoch values at double precision.
+        if USE_PG:
+            timestamp_columns = {
+                "schema_migrations": ("applied_at",),
+                "free_preview_usage": ("created_at", "updated_at"),
+                "generation_jobs": (
+                    "created_at", "finished_at", "available_at", "started_at", "heartbeat_at"
+                ),
+                "admin_sessions": ("created_at", "expires_at", "last_seen"),
+                "rate_limits": ("updated_at",),
+            }
+            for table, columns in timestamp_columns.items():
+                for column in columns:
+                    dbrun(
+                        f"ALTER TABLE {table} ALTER COLUMN {column} "
+                        f"TYPE DOUBLE PRECISION USING {column}::double precision"
+                    )
+        _mark_migration(5)
+
+
 def init_db():
     try:
         dbrun("""CREATE TABLE IF NOT EXISTS codes(
@@ -120,12 +264,6 @@ def init_db():
                     video_total INTEGER NOT NULL DEFAULT 0,
                     video_left INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT )""")
-        # миграция для уже созданной таблицы (добавляем видео-колонки, если их нет)
-        for col in ("video_total", "video_left"):
-            try:
-                dbrun(f"ALTER TABLE codes ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
         dbrun("""CREATE TABLE IF NOT EXISTS orders(
                     order_id TEXT PRIMARY KEY,
                     package TEXT,
@@ -143,8 +281,14 @@ def init_db():
                     comment TEXT,
                     visitor_id TEXT,
                     created_at TEXT )""")
-    except Exception as e:
-        print("init_db warning:", e)
+        dbrun("""CREATE TABLE IF NOT EXISTS schema_migrations(
+                    version INTEGER PRIMARY KEY,
+                    applied_at DOUBLE PRECISION NOT NULL )""")
+        apply_migrations()
+    except Exception as exc:
+        print("init_db failed:", exc)
+        if APP_ENV in {"staging", "production"}:
+            raise
 
 
 init_db()
@@ -169,8 +313,33 @@ def now_iso():
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
 
+def _begin(conn):
+    if USE_PG:
+        conn.autocommit = False
+    else:
+        conn.execute("BEGIN IMMEDIATE")
+
+
+def _cursor(conn):
+    return conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) if USE_PG else conn.cursor()
+
+
+def _sql(sql):
+    return sql.replace("?", "%s") if USE_PG else sql
+
+
+def _row_dict(row, cursor=None):
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return dict(row)
+    if hasattr(row, "keys"):
+        return dict(row)
+    return {d[0]: row[i] for i, d in enumerate(cursor.description)}
+
+
 def test_mode():
-    return (get_setting("test_mode") or "0") == "1"
+    return APP_ENV != "production" and (get_setting("test_mode") or "0") == "1"
 
 
 def payments_ready():
@@ -181,6 +350,36 @@ def effective_payments_ready():
     return payments_ready() and not test_mode()
 
 
+def _payment_field(value, name, default=None):
+    if isinstance(value, dict):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def payment_matches_order(payment, order):
+    """Accept only the exact YooKassa payment created for this order."""
+    if not payment or _payment_field(payment, "status") != "succeeded":
+        return False
+    if _payment_field(payment, "paid") is not True:
+        return False
+    if str(_payment_field(payment, "id", "")) != str(order.get("payment_id") or ""):
+        return False
+
+    metadata = _payment_field(payment, "metadata", {}) or {}
+    if str(_payment_field(metadata, "order_id", "")) != str(order.get("order_id") or ""):
+        return False
+
+    amount = _payment_field(payment, "amount", {}) or {}
+    if str(_payment_field(amount, "currency", "")).upper() != CURRENCY.upper():
+        return False
+    try:
+        actual = Decimal(str(_payment_field(amount, "value", ""))).quantize(Decimal("0.01"))
+        expected = Decimal(str(order.get("amount") or "")).quantize(Decimal("0.01"))
+    except (InvalidOperation, ValueError):
+        return False
+    return actual == expected
+
+
 # ------------------------------------------------- Коды доступа / баланс -------
 def new_code():
     alpha = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"     # без похожих символов
@@ -188,12 +387,12 @@ def new_code():
     return f"SG-{part()}-{part()}"
 
 
-def create_code(package, count, videos):
+def create_code(package, count, videos, order_id=None):
     code = new_code()
     videos = int(videos or 0)
-    dbrun("INSERT INTO codes(code,package,credits_total,credits_left,has_video,video_total,video_left,created_at) "
-          "VALUES(?,?,?,?,?,?,?,?)",
-          (code, package, count, count, 1 if videos > 0 else 0, videos, videos, now_iso()))
+    dbrun("INSERT INTO codes(code,package,credits_total,credits_left,has_video,video_total,video_left,created_at,order_id) "
+          "VALUES(?,?,?,?,?,?,?,?,?)",
+          (code, package, count, count, 1 if videos > 0 else 0, videos, videos, now_iso(), order_id))
     return code
 
 
@@ -218,6 +417,118 @@ def spend_video(code):
     return row.get("video_left") if row else None
 
 
+def reserve_generation(code, kind, job_id, token=None, mannequin=None, clothes=None):
+    """Atomically reserves one credit and enqueues a durable generation job."""
+    code = (code or "").strip().upper()
+    column = "video_left" if kind == "video" else "credits_left"
+    now = time.time()
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        cur.execute(_sql(
+            f"UPDATE codes SET {column}={column}-1 WHERE code=? AND {column}>0 "
+            "RETURNING credits_left,video_left"
+        ), (code,))
+        row = _row_dict(cur.fetchone(), cur)
+        if not row:
+            conn.rollback()
+            return None
+        cur.execute(_sql(
+            "INSERT INTO generation_jobs(job_id,code,kind,status,created_at,available_at,token,mannequin,clothes_json) "
+            "VALUES(?,?,?,?,?,?,?,?,?)"
+        ), (job_id, code, kind, "queued", now, now, token, mannequin, json.dumps(clothes or [])))
+        conn.commit()
+        return {"credits_left": int(row["credits_left"]), "video_left": int(row["video_left"])}
+
+
+def finish_generation(job_id, succeeded, error=None):
+    """Finalizes a reservation and refunds it exactly once after failure."""
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        lock = " FOR UPDATE" if USE_PG else ""
+        cur.execute(_sql("SELECT * FROM generation_jobs WHERE job_id=?" + lock), (job_id,))
+        job = _row_dict(cur.fetchone(), cur)
+        if not job or job["status"] not in ("queued", "processing"):
+            conn.rollback()
+            return False
+        if succeeded:
+            cur.execute(_sql("UPDATE generation_jobs SET status='succeeded',finished_at=? WHERE job_id=?"),
+                        (time.time(), job_id))
+        else:
+            column = "video_left" if job["kind"] == "video" else "credits_left"
+            cur.execute(_sql(f"UPDATE codes SET {column}={column}+1 WHERE code=?"), (job["code"],))
+            cur.execute(_sql("UPDATE generation_jobs SET status='refunded',finished_at=?,error=? WHERE job_id=?"),
+                        (time.time(), str(error or "generation failed")[:500], job_id))
+        conn.commit()
+        return True
+
+
+def enqueue_free_preview(job_id, token, mannequin, clothes, session_hash):
+    now = time.time()
+    dbrun(
+        "INSERT INTO generation_jobs(job_id,code,kind,status,created_at,available_at,token,mannequin,clothes_json,session_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (job_id, "", "free_preview", "queued", now, now, token, mannequin,
+         json.dumps(clothes or []), session_hash),
+    )
+
+
+def claim_generation_job(worker_id):
+    """Claims at most one queued job across all web/worker processes."""
+    now = time.time()
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        lock = " FOR UPDATE SKIP LOCKED" if USE_PG else ""
+        cur.execute(_sql(
+            "SELECT * FROM generation_jobs WHERE status='queued' AND COALESCE(available_at,created_at)<=? "
+            "ORDER BY created_at LIMIT 1" + lock
+        ), (now,))
+        job = _row_dict(cur.fetchone(), cur)
+        if not job:
+            conn.rollback()
+            return None
+        cur.execute(_sql(
+            "UPDATE generation_jobs SET status='processing',started_at=?,heartbeat_at=?,worker_id=?,attempts=attempts+1 "
+            "WHERE job_id=? AND status='queued'"
+        ), (now, now, worker_id, job["job_id"]))
+        if cur.rowcount != 1:
+            conn.rollback()
+            return None
+        conn.commit()
+        job.update({"status": "processing", "started_at": now, "heartbeat_at": now, "worker_id": worker_id})
+        return job
+
+
+def heartbeat_generation(job_id, worker_id):
+    dbrun("UPDATE generation_jobs SET heartbeat_at=? WHERE job_id=? AND worker_id=? AND status='processing'",
+          (time.time(), job_id, worker_id))
+
+
+def recover_interrupted_generations(stale_seconds=None):
+    """Refunds only abandoned processing jobs; queued jobs remain available."""
+    cutoff = time.time() - int(stale_seconds or WORKER_STALE_SECONDS)
+    rows = dbrun(
+        "SELECT job_id,kind,session_hash FROM generation_jobs WHERE status='processing' "
+        "AND COALESCE(heartbeat_at,started_at,created_at)<?",
+        (cutoff,), "all"
+    ) or []
+    recovered = 0
+    for row in rows:
+        if row["kind"] == "free_preview":
+            changed = dbrun(
+                "UPDATE generation_jobs SET status='error',finished_at=?,error=? "
+                "WHERE job_id=? AND status='processing'",
+                (time.time(), "worker stopped before completion", row["job_id"]),
+            )
+            finish_free_preview(row.get("session_hash"), False)
+            recovered += 1
+        elif finish_generation(row["job_id"], False, "worker stopped before completion"):
+            recovered += 1
+    return recovered
+
+
 # ---------------------------------------------------------------- Манекены ----
 def mannequin_frame(n):
     for ext in ("jpg", "jpeg", "png", "webp"):
@@ -236,9 +547,39 @@ def tryon_enabled():
 
 
 # -------------------------------------------------------------- Приложение ----
-app = FastAPI(title="StyleGlobe Sellers")
-app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL, "*"],
-                   allow_methods=["*"], allow_headers=["*"])
+@asynccontextmanager
+async def app_lifespan(_app):
+    start_embedded_worker()
+    yield
+
+
+app = FastAPI(title="StyleGlobe Sellers", lifespan=app_lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL],
+                   allow_methods=["GET", "POST"],
+                   allow_headers=["Content-Type", "X-CSRF-Token", "X-Test-Order-Secret"])
+
+
+@app.middleware("http")
+async def security_middleware(request: Request, call_next):
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > MAX_REQUEST_BYTES:
+                return JSONResponse({"detail": "request too large"}, status_code=413)
+        except ValueError:
+            return JSONResponse({"detail": "invalid content length"}, status_code=400)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
+    response.headers["X-Frame-Options"] = "DENY"
+    if request.url.path.startswith("/api/admin"):
+        response.headers["Cache-Control"] = "no-store"
+    if not request.cookies.get("sg_session"):
+        session_id = secrets.token_hex(16)
+        response.set_cookie("sg_session", _signed_session_value(session_id), max_age=31536000,
+                            httponly=True, secure=SITE_URL.startswith("https://"), samesite="lax")
+    return response
 
 
 def _page(name):
@@ -309,7 +650,15 @@ def sitemap_xml():
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "db": "postgres" if USE_PG else "sqlite"}
+    queued = dbrun("SELECT COUNT(*) AS n FROM generation_jobs WHERE status='queued'", (), "one") or {"n": 0}
+    processing = dbrun("SELECT COUNT(*) AS n FROM generation_jobs WHERE status='processing'", (), "one") or {"n": 0}
+    return {
+        "status": "ok",
+        "db": "postgres" if USE_PG else "sqlite",
+        "queue": {"queued": int(queued["n"]), "processing": int(processing["n"])},
+        "workerMode": "embedded" if EMBEDDED_WORKER else "external",
+        "embeddedWorkerAlive": bool(WORKER_THREAD and WORKER_THREAD.is_alive()),
+    }
 
 
 @app.get("/model/{n}")
@@ -328,13 +677,101 @@ def asset_file(fname: str):
     raise HTTPException(404, "не найдено")
 
 
-@app.get("/api/img/{token}")
-def serve_img(token: str):
-    safe = "".join(c for c in token if c.isalnum())
-    p = os.path.join(IMG_DIR, safe + ".jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg")
-    raise HTTPException(404, "not found")
+def _file_signature(kind, token, expires):
+    message = f"file:{kind}:{token}:{int(expires)}"
+    return hmac.new(SESSION_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+def _signed_file_url(kind, token, expires=None):
+    expires = int(expires or (time.time() + FILE_TTL_HOURS * 3600))
+    signature = _file_signature(kind, token, expires)
+    return f"{SITE_URL}/api/file/{kind}/{token}?exp={expires}&sig={signature}"
+
+
+def _private_file_path(kind, token):
+    if not re.fullmatch(r"[a-f0-9]{32}", token or ""):
+        return None
+    names = {
+        "upload": f"{token}.jpg",
+        "preview": f"prevwm_{token}.jpg",
+        "photo": f"hd_{token}.jpg",
+        "video": f"hd_{token}.mp4",
+    }
+    name = names.get(kind)
+    return os.path.join(IMG_DIR, name) if name else None
+
+
+def s3_enabled():
+    return bool(S3_ENDPOINT_URL and S3_BUCKET and S3_ACCESS_KEY and S3_SECRET_KEY)
+
+
+def _s3_client():
+    return boto3.client("s3", endpoint_url=S3_ENDPOINT_URL, region_name=S3_REGION,
+                        aws_access_key_id=S3_ACCESS_KEY, aws_secret_access_key=S3_SECRET_KEY)
+
+
+def _s3_key(kind, token):
+    path = _private_file_path(kind, token)
+    return f"media/{os.path.basename(path)}" if path else None
+
+
+def _upload_private_file(kind, token, path):
+    key = _s3_key(kind, token)
+    if not key:
+        raise RuntimeError("invalid private file key")
+    content_type = "video/mp4" if kind == "video" else "image/jpeg"
+    _s3_client().upload_file(path, S3_BUCKET, key, ExtraArgs={"ContentType": content_type})
+
+
+def _private_file_exists(kind, token):
+    if not s3_enabled():
+        path = _private_file_path(kind, token)
+        return bool(path and os.path.exists(path))
+    try:
+        _s3_client().head_object(Bucket=S3_BUCKET, Key=_s3_key(kind, token))
+        return True
+    except Exception:
+        return False
+
+
+def _delete_private_file(kind, token):
+    path = _private_file_path(kind, token)
+    if s3_enabled():
+        key = _s3_key(kind, token)
+        if key:
+            try:
+                _s3_client().delete_object(Bucket=S3_BUCKET, Key=key)
+            except Exception:
+                pass
+    if path:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+@app.get("/api/file/{kind}/{token}")
+def serve_private_file(kind: str, token: str, exp: int, sig: str):
+    if exp < int(time.time()) or not hmac.compare_digest(sig, _file_signature(kind, token, exp)):
+        raise HTTPException(403, "link expired or invalid")
+    path = _private_file_path(kind, token)
+    if not path or not _private_file_exists(kind, token):
+        raise HTTPException(404, "not found")
+    if s3_enabled():
+        try:
+            obj = _s3_client().get_object(Bucket=S3_BUCKET, Key=_s3_key(kind, token))
+        except Exception as exc:
+            raise HTTPException(404, "not found") from exc
+        media_type = "video/mp4" if kind == "video" else "image/jpeg"
+        filename = "styleglobe-hd.mp4" if kind == "video" else "styleglobe-hd.jpg"
+        return StreamingResponse(obj["Body"].iter_chunks(), media_type=media_type,
+                                 headers={"Content-Disposition": f'inline; filename="{filename}"'})
+    if kind == "video":
+        return FileResponse(path, media_type="video/mp4", filename="styleglobe-hd.mp4",
+                            content_disposition_type="inline")
+    filename = "styleglobe-hd.jpg" if kind == "photo" else None
+    return FileResponse(path, media_type="image/jpeg", filename=filename,
+                        content_disposition_type="inline")
 
 
 @app.get("/api/config")
@@ -351,12 +788,63 @@ def config():
 
 # ---------------------------------------------------- Изображения/водяной знак -
 def _save_dataurl(data_url):
-    b64 = data_url.split(",", 1)[1] if "," in data_url else data_url
-    raw = base64.b64decode(b64)
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    cleanup_old_files()
+
+    if not isinstance(data_url, str):
+        raise ValueError("invalid image")
+    match = re.fullmatch(r"data:image/(jpeg|png|webp);base64,([A-Za-z0-9+/=\r\n]+)", data_url)
+    if not match:
+        raise ValueError("only JPEG, PNG and WEBP data URLs are accepted")
+    try:
+        raw = base64.b64decode(match.group(2), validate=True)
+    except Exception as exc:
+        raise ValueError("invalid base64 image") from exc
+    if not raw or len(raw) > MAX_IMAGE_BYTES:
+        raise ValueError("image is empty or too large")
+    try:
+        probe = Image.open(io.BytesIO(raw))
+        if probe.format not in {"JPEG", "PNG", "WEBP"}:
+            raise ValueError("unsupported image format")
+        width, height = probe.size
+        if width < 1 or height < 1 or width * height > MAX_IMAGE_PIXELS:
+            raise ValueError("invalid image dimensions")
+        probe.verify()
+        image = Image.open(io.BytesIO(raw))
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        image.thumbnail((MAX_IMAGE_EDGE, MAX_IMAGE_EDGE))
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("image cannot be decoded") from exc
     token = uuid.uuid4().hex
-    with open(os.path.join(IMG_DIR, token + ".jpg"), "wb") as f:
-        f.write(raw)
-    return f"{SITE_URL}/api/img/{token}"
+    upload_path = os.path.join(IMG_DIR, token + ".jpg")
+    image.save(upload_path, "JPEG", quality=90, optimize=True)
+    if s3_enabled():
+        _upload_private_file("upload", token, upload_path)
+        os.remove(upload_path)
+    return _signed_file_url("upload", token)
+
+
+def cleanup_old_files(force=False):
+    global LAST_FILE_CLEANUP
+    now = time.time()
+    if not force and now - LAST_FILE_CLEANUP < 600:
+        return 0
+    removed = 0
+    cutoff = now - FILE_TTL_HOURS * 3600
+    with FILE_CLEANUP_LOCK:
+        if not force and now - LAST_FILE_CLEANUP < 600:
+            return 0
+        for name in os.listdir(IMG_DIR):
+            path = os.path.join(IMG_DIR, name)
+            try:
+                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                    os.remove(path)
+                    removed += 1
+            except OSError:
+                pass
+        LAST_FILE_CLEANUP = now
+    return removed
 
 
 def _save_garment_urls(garments):
@@ -364,20 +852,44 @@ def _save_garment_urls(garments):
     for g in (garments or []):
         if not g:
             continue
-        try:
-            urls.append(_save_dataurl(g))
-        except Exception:
-            pass
+        urls.append(_save_dataurl(g))
         if len(urls) >= 8:
             break
     return urls
 
 
 def _download_to(url, path):
-    r = requests.get(url, timeout=180)
-    r.raise_for_status()
-    with open(path, "wb") as f:
-        f.write(r.content)
+    total = 0
+    try:
+        with requests.get(url, timeout=180, stream=True) as response:
+            response.raise_for_status()
+            with open(path, "wb") as output:
+                for chunk in response.iter_content(1024 * 1024):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_RESULT_BYTES:
+                        raise RuntimeError("result file is too large")
+                    output.write(chunk)
+    except Exception:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
+
+
+def _normalize_photo_to_jpeg(path):
+    """Keep the stored HD-photo bytes consistent with its JPEG response type."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(path) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+            image.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise RuntimeError("generated photo is not a supported image") from exc
+    image.save(path, "JPEG", quality=95, optimize=True)
 
 
 def _wm_font(size):
@@ -449,13 +961,15 @@ def _wavespeed_poll(poll_url):
     return status, url
 
 
-def _generate(portrait_url, clothes, kind):
+def _generate(portrait_url, clothes, kind, heartbeat=None):
     is_video = (kind == "video")
     model = WAVESPEED_VIDEO_MODEL if is_video else WAVESPEED_PHOTO_MODEL
     pred_id, poll = _wavespeed_create(portrait_url, clothes, model, is_video and TRYON_SEND_DURATION)
     if not poll:
         raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
     for _ in range(100 if is_video else 40):
+        if heartbeat:
+            heartbeat()
         time.sleep(3)
         status, url = _wavespeed_poll(poll)
         if status in ("completed", "succeeded", "success") and url:
@@ -466,6 +980,92 @@ def _generate(portrait_url, clothes, kind):
 
 
 # --------------------------------------------- Бесплатное превью (1 на гостя) --
+def _signed_session_value(session_id):
+    signature = hmac.new(SESSION_SECRET.encode(), session_id.encode(), hashlib.sha256).hexdigest()
+    return f"{session_id}.{signature}"
+
+
+def _session_id_from_request(request):
+    raw = request.cookies.get("sg_session", "")
+    try:
+        session_id, signature = raw.split(".", 1)
+    except ValueError:
+        return None
+    expected = hmac.new(SESSION_SECRET.encode(), session_id.encode(), hashlib.sha256).hexdigest()
+    if not re.fullmatch(r"[a-f0-9]{32}", session_id) or not hmac.compare_digest(signature, expected):
+        return None
+    return session_id
+
+
+def _client_ip(request):
+    if TRUST_PROXY_HEADERS:
+        forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",")]
+        forwarded = [part for part in forwarded if part]
+        if forwarded:
+            # A single trusted edge proxy appends the actual peer address last.
+            # Taking the first value would let a client prepend an arbitrary IP.
+            return forwarded[-1]
+    return request.client.host if request.client else "unknown"
+
+
+def _private_hash(label, value):
+    return hmac.new(SESSION_SECRET.encode(), f"{label}:{value}".encode(), hashlib.sha256).hexdigest()
+
+
+def consume_rate_limit(namespace, subject, limit, window_seconds):
+    """Atomically consumes a shared database-backed rate-limit slot."""
+    now = time.time()
+    window_start = int(now // window_seconds) * int(window_seconds)
+    bucket_key = _private_hash("rate-limit", f"{namespace}:{subject}")
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        cur.execute(_sql("DELETE FROM rate_limits WHERE updated_at<?"), (now - 7 * 86400,))
+        cur.execute(_sql(
+            "INSERT INTO rate_limits(bucket_key,window_start,hits,updated_at) VALUES(?,?,1,?) "
+            "ON CONFLICT(bucket_key,window_start) DO UPDATE SET "
+            "hits=rate_limits.hits+1,updated_at=excluded.updated_at RETURNING hits"
+        ), (bucket_key, window_start, now))
+        row = _row_dict(cur.fetchone(), cur)
+        conn.commit()
+    hits = int(row["hits"])
+    retry_after = max(1, window_start + int(window_seconds) - int(now))
+    return {"allowed": hits <= int(limit), "hits": hits, "retry_after": retry_after}
+
+
+def clear_rate_limit(namespace, subject):
+    bucket_key = _private_hash("rate-limit", f"{namespace}:{subject}")
+    dbrun("DELETE FROM rate_limits WHERE bucket_key=?", (bucket_key,))
+
+
+def reserve_free_preview(session_hash, ip_hash):
+    """Reserves a free preview before any external AI call."""
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        cur.execute(_sql("SELECT 1 FROM free_preview_usage WHERE session_hash=?"), (session_hash,))
+        if cur.fetchone():
+            conn.rollback()
+            return False
+        cutoff = time.time() - 86400
+        cur.execute(_sql("SELECT COUNT(*) AS n FROM free_preview_usage WHERE ip_hash=? AND created_at>=?"),
+                    (ip_hash, cutoff))
+        count_row = _row_dict(cur.fetchone(), cur)
+        if int(count_row["n"]) >= FREE_PREVIEW_IP_LIMIT:
+            conn.rollback()
+            return False
+        now = time.time()
+        cur.execute(_sql("INSERT INTO free_preview_usage(session_hash,ip_hash,status,created_at,updated_at) "
+                         "VALUES(?,?,?,?,?)"), (session_hash, ip_hash, "processing", now, now))
+        conn.commit()
+        return True
+
+
+def finish_free_preview(session_hash, succeeded):
+    dbrun("UPDATE free_preview_usage SET status=?,updated_at=? WHERE session_hash=? AND status='processing'",
+          ("used" if succeeded else "failed", time.time(), session_hash))
+
+
 def has_used_free(vid):
     if not vid:
         return False
@@ -491,57 +1091,45 @@ class FreePreviewIn(BaseModel):
     visitorId: str = ""
 
 
-def _run_free_preview(task_id, token, mannequin, clothes, vid):
-    TASKS[task_id] = {"status": "processing", "token": token, "error": None}
-    try:
-        portrait = f"{SITE_URL}/model/{mannequin}"
-        url = _generate(portrait, clothes, "photo")
-        hd = os.path.join(IMG_DIR, f"prev_{token}.jpg")
-        _download_to(url, hd)
-        make_transparent_watermark(hd, os.path.join(IMG_DIR, f"prevwm_{token}.jpg"))
-        if not test_mode():
-            mark_free_used(vid)
-        TASKS[task_id] = {"status": "done", "token": token, "error": None,
-                          "previewUrl": f"/api/preview/{token}"}
-    except Exception as e:
-        TASKS[task_id] = {"status": "error", "token": token, "error": str(e)}
-
-
 @app.post("/api/free-preview")
-def free_preview(data: FreePreviewIn):
+def free_preview(data: FreePreviewIn, request: Request):
     if not tryon_enabled():
         raise HTTPException(503, "Генерация не настроена (нет ключа WaveSpeed или манекенов)")
-    vid = (data.visitorId or "").strip()[:64]
-    if vid and has_used_free(vid) and not test_mode():
-        raise HTTPException(429, "Бесплатное превью уже использовано. Купите пакет, чтобы создавать фото в HD.")
-    clothes = _save_garment_urls(data.garments)
+    try:
+        clothes = _save_garment_urls(data.garments)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if not clothes:
         raise HTTPException(400, "Нет фото товара")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
         available_mannequins()[0]["id"] if available_mannequins() else 1)
+    session_id = _session_id_from_request(request) or secrets.token_hex(16)
+    session_hash = _private_hash("session", session_id)
+    ip_hash = _private_hash("ip", _client_ip(request))
+    if not test_mode() and not reserve_free_preview(session_hash, ip_hash):
+        raise HTTPException(429, "Бесплатное превью уже использовано или достигнут суточный лимит.")
     token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "token": token, "error": None}
-    threading.Thread(target=_run_free_preview, args=(task_id, token, mannequin, clothes, vid),
-                     daemon=True).start()
-    return {"task_id": task_id, "token": token}
-
-
-@app.get("/api/preview/{token}")
-def serve_preview(token: str):
-    safe = "".join(c for c in token if c.isalnum())
-    p = os.path.join(IMG_DIR, f"prevwm_{safe}.jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg")
-    raise HTTPException(404, "не найдено")
+    enqueue_free_preview(task_id, token, mannequin, clothes, session_hash)
+    response = JSONResponse({"task_id": task_id, "token": token})
+    response.set_cookie("sg_session", _signed_session_value(session_id), max_age=31536000,
+                        httponly=True, secure=SITE_URL.startswith("https://"), samesite="lax")
+    return response
 
 
 @app.get("/api/task/{task_id}")
 def task_status(task_id: str):
-    t = TASKS.get(task_id)
-    if not t:
+    task = dbrun("SELECT * FROM generation_jobs WHERE job_id=?", (task_id,), "one")
+    if not task:
         raise HTTPException(404, "Задача не найдена")
-    return t
+    base = {"token": task.get("token"), "kind": task.get("kind"), "error": None}
+    if task["status"] in ("queued", "processing"):
+        return {**base, "status": "processing"}
+    if task["status"] == "succeeded":
+        if task["kind"] == "free_preview":
+            return {**base, "status": "done", "previewUrl": _signed_file_url("preview", task["token"])}
+        return {**base, "status": "done", "url": _signed_file_url(task["kind"], task["token"])}
+    return {**base, "status": "error", "error": "Генерация не завершена. Попробуйте ещё раз."}
 
 
 # ---------------------------------------------------------- Покупка пакета ----
@@ -559,39 +1147,65 @@ def create_payment(data: CreatePaymentIn):
     order_id = uuid.uuid4().hex
     dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,created_at) VALUES(?,?,?,0,0,?)",
           (order_id, pkg["id"], pkg["price"], now_iso()))
-    payment = Payment.create({
-        "amount": {"value": pkg["price"], "currency": CURRENCY},
-        "capture": True,
-        "confirmation": {"type": "redirect", "return_url": f"{SITE_URL}/?order_id={order_id}"},
-        "description": f"StyleGlobe — пакет «{pkg['title']}» ({pkg['count']} генераций)",
-        "metadata": {"order_id": order_id},
-    }, uuid.uuid4().hex)
+    try:
+        payment = Payment.create({
+            "amount": {"value": pkg["price"], "currency": CURRENCY},
+            "capture": True,
+            "confirmation": {"type": "redirect", "return_url": f"{SITE_URL}/?order_id={order_id}"},
+            "description": f"StyleGlobe — пакет «{pkg['title']}» ({pkg['count']} генераций)",
+            "metadata": {"order_id": order_id},
+        }, order_id)
+    except Exception:
+        raise HTTPException(502, "ЮKassa временно недоступна; платёж не создан")
+    confirmation = _payment_field(payment, "confirmation")
+    confirmation_url = _payment_field(confirmation, "confirmation_url", "")
+    if not _payment_field(payment, "id") or not confirmation_url:
+        raise HTTPException(502, "ЮKassa вернула неполный ответ; платёж не создан")
     dbrun("UPDATE orders SET payment_id=? WHERE order_id=?", (payment.id, order_id))
-    return {"order_id": order_id, "confirmation_url": payment.confirmation.confirmation_url}
+    return {"order_id": order_id, "confirmation_url": confirmation_url}
 
 
-def _issue_code_for_order(order):
-    if order.get("code"):
-        return order["code"]
-    pkg = PACKAGE_BY_ID.get(order["package"])
-    if not pkg:
-        return None
-    code = create_code(pkg["id"], pkg["count"], pkg["videos"])
-    dbrun("UPDATE orders SET code=? WHERE order_id=?", (code, order["order_id"]))
-    return code
+def issue_code_for_order(order_id):
+    """Returns the single access code linked to a paid order."""
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        lock = " FOR UPDATE" if USE_PG else ""
+        cur.execute(_sql("SELECT * FROM orders WHERE order_id=?" + lock), (order_id,))
+        order = _row_dict(cur.fetchone(), cur)
+        if not order or not order["paid"]:
+            conn.rollback()
+            return None
+        if order.get("code"):
+            conn.commit()
+            return order["code"]
+        pkg = PACKAGE_BY_ID.get(order["package"])
+        if not pkg:
+            conn.rollback()
+            return None
+        code = new_code()
+        videos = int(pkg["videos"] or 0)
+        cur.execute(_sql(
+            "INSERT INTO codes(code,package,credits_total,credits_left,has_video,video_total,video_left,created_at,order_id) "
+            "VALUES(?,?,?,?,?,?,?,?,?)"
+        ), (code, pkg["id"], pkg["count"], pkg["count"], 1 if videos > 0 else 0,
+            videos, videos, now_iso(), order_id))
+        cur.execute(_sql("UPDATE orders SET code=? WHERE order_id=? AND code IS NULL"), (code, order_id))
+        conn.commit()
+        return code
 
 
 def verify_and_issue(order):
     if order["paid"]:
-        return True, (order.get("code") or _issue_code_for_order(order))
+        return True, (order.get("code") or issue_code_for_order(order["order_id"]))
     if not (payments_ready() and order.get("payment_id")):
         return False, None
     try:
         p = Payment.find_one(order["payment_id"])
-        if getattr(p, "status", None) == "succeeded":
-            dbrun("UPDATE orders SET paid=1 WHERE order_id=?", (order["order_id"],))
+        if payment_matches_order(p, order):
+            dbrun("UPDATE orders SET paid=1 WHERE order_id=? AND paid=0", (order["order_id"],))
             order["paid"] = 1
-            return True, _issue_code_for_order(order)
+            return True, issue_code_for_order(order["order_id"])
     except Exception:
         return False, None
     return False, None
@@ -624,29 +1238,81 @@ class GenerateIn(BaseModel):
     garments: List[str] = []
 
 
-def _run_hd(task_id, token, mannequin, clothes, kind):
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
+def process_generation_job(job, worker_id):
+    task_id = job["job_id"]
+    token = job.get("token")
+    kind = job["kind"]
+    session_hash = job.get("session_hash")
     try:
-        portrait = f"{SITE_URL}/model/{mannequin}"
-        url = _generate(portrait, clothes, kind)
-        if kind == "photo":
-            _download_to(url, os.path.join(IMG_DIR, f"hd_{token}.jpg"))
-            TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
-                              "error": None, "url": f"/api/hd/{token}.jpg"}
+        clothes = json.loads(job.get("clothes_json") or "[]")
+        if not isinstance(clothes, list) or not clothes:
+            raise RuntimeError("job has no garment images")
+        portrait = f"{SITE_URL}/model/{int(job.get('mannequin') or 1)}"
+        heartbeat = lambda: heartbeat_generation(task_id, worker_id)
+        provider_kind = "photo" if kind == "free_preview" else kind
+        url = _generate(portrait, clothes, provider_kind, heartbeat=heartbeat)
+        heartbeat()
+        if kind == "free_preview":
+            raw_path = os.path.join(IMG_DIR, f"prev_{token}.jpg")
+            _download_to(url, raw_path)
+            make_transparent_watermark(raw_path, _private_file_path("preview", token))
+            if s3_enabled():
+                _upload_private_file("preview", token, _private_file_path("preview", token))
+                os.remove(_private_file_path("preview", token))
+            try:
+                os.remove(raw_path)
+            except OSError:
+                pass
+            dbrun("UPDATE generation_jobs SET status='succeeded',finished_at=?,heartbeat_at=? "
+                  "WHERE job_id=? AND status='processing' AND worker_id=?",
+                  (time.time(), time.time(), task_id, worker_id))
+            finish_free_preview(session_hash, True)
         else:
-            TASKS[task_id] = {"status": "done", "token": token, "kind": "video",
-                              "error": None, "url": url}
+            result_path = _private_file_path(kind, token)
+            _download_to(url, result_path)
+            if kind == "photo":
+                _normalize_photo_to_jpeg(result_path)
+            if s3_enabled():
+                _upload_private_file(kind, token, result_path)
+                os.remove(result_path)
+            finish_generation(task_id, True)
     except Exception as e:
-        TASKS[task_id] = {"status": "error", "token": token, "kind": kind, "error": str(e)}
+        if kind == "free_preview":
+            dbrun("UPDATE generation_jobs SET status='error',finished_at=?,error=? "
+                  "WHERE job_id=? AND status='processing'",
+                  (time.time(), str(e)[:500], task_id))
+            finish_free_preview(session_hash, False)
+        else:
+            finish_generation(task_id, False, e)
 
 
-@app.get("/api/hd/{name}")
-def serve_hd(name: str):
-    safe = "".join(c for c in name.replace(".jpg", "") if c.isalnum())
-    p = os.path.join(IMG_DIR, f"hd_{safe}.jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg", filename="styleglobe-hd.jpg")
-    raise HTTPException(404, "не найдено")
+def worker_once(worker_id=None):
+    worker_id = worker_id or f"worker-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    job = claim_generation_job(worker_id)
+    if not job:
+        return False
+    process_generation_job(job, worker_id)
+    return True
+
+
+def run_worker_forever(stop_event=None):
+    stop_event = stop_event or threading.Event()
+    worker_id = f"worker-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    recover_interrupted_generations()
+    while not stop_event.is_set():
+        if not worker_once(worker_id):
+            stop_event.wait(WORKER_POLL_SECONDS)
+
+
+def start_embedded_worker():
+    global WORKER_THREAD
+    if not EMBEDDED_WORKER:
+        return
+    with WORKER_START_LOCK:
+        if WORKER_THREAD and WORKER_THREAD.is_alive():
+            return
+        WORKER_THREAD = threading.Thread(target=run_worker_forever, daemon=True, name="generation-worker")
+        WORKER_THREAD.start()
 
 
 @app.post("/api/generate")
@@ -663,23 +1329,23 @@ def generate_hd(data: GenerateIn):
     else:
         if row["credits_left"] <= 0:
             raise HTTPException(402, "Фото-генерации закончились. Купите новый пакет.")
-    clothes = _save_garment_urls(data.garments)
+    try:
+        clothes = _save_garment_urls(data.garments)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if not clothes:
         raise HTTPException(400, "Нет фото товара")
-    left = spend_video(data.code) if kind == "video" else spend_credit(data.code)  # списываем ДО запуска
-    if left is None:
-        raise HTTPException(402, "Генерации закончились")
     mannequin = data.mannequin if mannequin_frame(data.mannequin) else (
         available_mannequins()[0]["id"] if available_mannequins() else 1)
     token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
-    threading.Thread(target=_run_hd, args=(task_id, token, mannequin, clothes, kind),
-                     daemon=True).start()
-    fresh = get_code(data.code) or {}
-    return {"task_id": task_id, "kind": kind, "creditsLeft": left,
-            "photoLeft": int(fresh.get("credits_left") or 0),
-            "videoLeft": int(fresh.get("video_left") or 0)}
+    balances = reserve_generation(data.code, kind, task_id, token, mannequin, clothes)
+    if balances is None:
+        raise HTTPException(402, "Генерации закончились")
+    return {"task_id": task_id, "kind": kind,
+            "creditsLeft": balances["credits_left"],
+            "photoLeft": balances["credits_left"],
+            "videoLeft": balances["video_left"]}
 
 
 # -------------------------------------------------------------- Обратная связь -
@@ -689,11 +1355,20 @@ class FeedbackIn(BaseModel):
     visitorId: Optional[str] = ""
 
 
+FEEDBACK_REASONS = {
+    "дорого",
+    "не уверен в качестве",
+    "не разобрался",
+    "просто смотрю",
+    "другое",
+}
+
+
 @app.post("/api/feedback")
 def submit_feedback(data: FeedbackIn):
     reason = (data.reason or "").strip()[:60]
-    if not reason:
-        raise HTTPException(400, "Пустой ответ")
+    if reason not in FEEDBACK_REASONS:
+        raise HTTPException(400, "Недопустимая причина")
     comment = (data.comment or "").strip()[:500]
     vid = (data.visitorId or "").strip()[:80]
     dbrun("INSERT INTO feedback(id,reason,comment,visitor_id,created_at) VALUES(?,?,?,?,?)",
@@ -707,16 +1382,19 @@ class TestOrderIn(BaseModel):
 
 
 @app.post("/api/test-order")
-def test_order(data: TestOrderIn):
-    if effective_payments_ready():
-        raise HTTPException(403, "Недоступно в боевом режиме")
+def test_order(data: TestOrderIn, request: Request):
+    supplied = request.headers.get("x-test-order-secret", "")
+    allowed = (APP_ENV != "production" and ENABLE_TEST_ORDERS and TEST_ORDER_SECRET and
+               hmac.compare_digest(supplied, TEST_ORDER_SECRET))
+    if not allowed:
+        raise HTTPException(404, "not found")
     pkg = PACKAGE_BY_ID.get(data.package)
     if not pkg:
         raise HTTPException(400, "Неизвестный пакет")
     order_id = uuid.uuid4().hex
-    code = create_code(pkg["id"], pkg["count"], pkg["videos"])
     dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,code,created_at) "
-          "VALUES(?,?,?,1,1,?,?)", (order_id, pkg["id"], pkg["price"], code, now_iso()))
+          "VALUES(?,?,?,1,1,NULL,?)", (order_id, pkg["id"], pkg["price"], now_iso()))
+    code = issue_code_for_order(order_id)
     return {"ok": True, "order_id": order_id, "code": code}
 
 
@@ -729,20 +1407,95 @@ class SettingsIn(BaseModel):
     test_mode: Optional[bool] = None
 
 
-def require_admin(request: Request):
+ADMIN_COOKIE_NAME = "sg_admin"
+
+
+def _set_admin_cookie(response, token):
+    response.set_cookie(
+        ADMIN_COOKIE_NAME,
+        token,
+        max_age=ADMIN_SESSION_HOURS * 3600,
+        httponly=True,
+        secure=SITE_URL.startswith("https://"),
+        samesite="strict",
+        path="/",
+    )
+
+
+def _create_admin_session(request):
+    token = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    now = time.time()
+    dbrun("DELETE FROM admin_sessions WHERE expires_at<?", (now,))
+    dbrun(
+        "INSERT INTO admin_sessions(session_hash,csrf_hash,created_at,expires_at,last_seen,ip_hash,user_agent_hash) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (
+            _private_hash("admin-session", token),
+            _private_hash("admin-csrf", csrf_token),
+            now,
+            now + ADMIN_SESSION_HOURS * 3600,
+            now,
+            _private_hash("admin-ip", _client_ip(request)),
+            _private_hash("admin-user-agent", request.headers.get("user-agent", "")[:500]),
+        ),
+    )
+    return token, csrf_token
+
+
+def require_admin(request: Request, require_csrf=False):
     if not ADMIN_PASSWORD:
         raise HTTPException(503, "Админка не настроена: задайте ADMIN_PASSWORD")
-    if request.headers.get("x-admin-token", "") != ADMIN_TOKEN:
+    token = request.cookies.get(ADMIN_COOKIE_NAME, "")
+    session_hash = _private_hash("admin-session", token)
+    session = dbrun("SELECT * FROM admin_sessions WHERE session_hash=?", (session_hash,), "one")
+    now = time.time()
+    if not session or float(session["expires_at"]) <= now:
+        if session:
+            dbrun("DELETE FROM admin_sessions WHERE session_hash=?", (session_hash,))
         raise HTTPException(401, "Требуется вход администратора")
+    if require_csrf:
+        supplied = request.headers.get("x-csrf-token", "")
+        supplied_hash = _private_hash("admin-csrf", supplied)
+        if not hmac.compare_digest(supplied_hash, session["csrf_hash"]):
+            raise HTTPException(403, "Недействительный CSRF-токен")
+    dbrun("UPDATE admin_sessions SET last_seen=? WHERE session_hash=?", (now, session_hash))
+    return session
 
 
 @app.post("/api/admin/login")
-def admin_login(data: AdminLoginIn):
+def admin_login(data: AdminLoginIn, request: Request, response: Response):
     if not ADMIN_PASSWORD:
         raise HTTPException(503, "Задайте ADMIN_PASSWORD")
-    if data.password != ADMIN_PASSWORD:
+    attempt_key = _private_hash("admin-login", _client_ip(request))
+    rate = consume_rate_limit("admin-login", attempt_key, 5, 900)
+    if not rate["allowed"]:
+        raise HTTPException(429, "Слишком много попыток. Повторите позже.",
+                            headers={"Retry-After": str(rate["retry_after"])})
+    if not hmac.compare_digest(data.password, ADMIN_PASSWORD):
         raise HTTPException(401, "Неверный пароль")
-    return {"token": ADMIN_TOKEN}
+    clear_rate_limit("admin-login", attempt_key)
+    token, csrf_token = _create_admin_session(request)
+    _set_admin_cookie(response, token)
+    return {"ok": True, "csrfToken": csrf_token, "expiresIn": ADMIN_SESSION_HOURS * 3600}
+
+
+@app.get("/api/admin/session")
+def admin_session(request: Request):
+    session = require_admin(request)
+    csrf_token = secrets.token_urlsafe(32)
+    dbrun("UPDATE admin_sessions SET csrf_hash=? WHERE session_hash=?",
+          (_private_hash("admin-csrf", csrf_token), session["session_hash"]))
+    return {"ok": True, "csrfToken": csrf_token}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(request: Request, response: Response):
+    session = require_admin(request, require_csrf=True)
+    dbrun("DELETE FROM admin_sessions WHERE session_hash=?", (session["session_hash"],))
+    response.delete_cookie(ADMIN_COOKIE_NAME, path="/", secure=SITE_URL.startswith("https://"),
+                           httponly=True, samesite="strict")
+    return {"ok": True}
 
 
 @app.get("/api/admin/stats")
@@ -767,6 +1520,32 @@ def admin_orders(request: Request):
     return {"orders": (dbrun("SELECT * FROM orders ORDER BY created_at DESC", (), "all") or [])[:200]}
 
 
+@app.post("/api/admin/cleanup-test-data")
+def cleanup_test_data(request: Request):
+    """Remove only staging test orders, their access codes, jobs and private media."""
+    require_admin(request, require_csrf=True)
+    if APP_ENV == "production":
+        raise HTTPException(404, "not found")
+    test_orders = dbrun("SELECT order_id,code FROM orders WHERE is_test=1", (), "all") or []
+    codes = [row.get("code") for row in test_orders if row.get("code")]
+    jobs = []
+    for code in codes:
+        jobs.extend(dbrun("SELECT kind,token FROM generation_jobs WHERE code=?", (code,), "all") or [])
+    for job in jobs:
+        kind = "preview" if job.get("kind") == "free_preview" else job.get("kind")
+        if kind in {"preview", "photo", "video"}:
+            _delete_private_file(kind, job.get("token"))
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        for code in codes:
+            cur.execute(_sql("DELETE FROM generation_jobs WHERE code=?"), (code,))
+            cur.execute(_sql("DELETE FROM codes WHERE code=?"), (code,))
+        cur.execute(_sql("DELETE FROM orders WHERE is_test=1"))
+        conn.commit()
+    return {"ok": True, "ordersDeleted": len(test_orders), "jobsDeleted": len(jobs)}
+
+
 @app.get("/api/admin/feedback")
 def admin_feedback(request: Request):
     require_admin(request)
@@ -779,8 +1558,10 @@ def admin_feedback(request: Request):
 
 @app.post("/api/admin/settings")
 def admin_settings(request: Request, data: SettingsIn):
-    require_admin(request)
+    require_admin(request, require_csrf=True)
     if data.test_mode is not None:
+        if APP_ENV == "production" and data.test_mode:
+            raise HTTPException(403, "Тестовый режим запрещён в production")
         set_setting("test_mode", "1" if data.test_mode else "0")
     return {"ok": True, "testMode": test_mode()}
 
@@ -793,9 +1574,9 @@ async def yookassa_webhook(request: Request):
     except Exception:
         return Response(status_code=200)
     if (body or {}).get("event") == "payment.succeeded":
-        order_id = ((body.get("object") or {}).get("metadata") or {}).get("order_id")
-        if order_id:
-            order = dbrun("SELECT * FROM orders WHERE order_id=?", (order_id,), "one")
+        payment_id = (body.get("object") or {}).get("id")
+        if payment_id:
+            order = dbrun("SELECT * FROM orders WHERE payment_id=?", (str(payment_id),), "one")
             if order:
                 verify_and_issue(order)
     return Response(status_code=200)
