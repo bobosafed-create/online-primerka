@@ -549,12 +549,16 @@ function renderGallery(){
   if('IntersectionObserver' in window){
     const io=new IntersectionObserver((ents)=>{
       ents.forEach(e=>{ const v=e.target;
-        if(e.isIntersecting && e.intersectionRatio>0.6){ try{v.play();}catch(_){} }
+        if(e.isIntersecting && e.intersectionRatio>0.6){
+          try{ const playPromise=v.play(); if(playPromise) playPromise.catch(()=>{}); }catch(_){}
+        }
         else { try{v.pause();}catch(_){} }
       });
     },{threshold:[0,0.6,1]});
     vids.forEach(v=>io.observe(v));
-  } else if(vids[0]){ try{vids[0].play();}catch(_){} }
+  } else if(vids[0]){
+    try{ const playPromise=vids[0].play(); if(playPromise) playPromise.catch(()=>{}); }catch(_){}
+  }
   g.addEventListener('scroll', ()=>{
     const idx = Math.round(g.scrollLeft / g.clientWidth);
     if(dots) dots.querySelectorAll('span').forEach((s,i)=>s.classList.toggle('on', i===idx));
@@ -567,7 +571,11 @@ function openLB(kind, src){
   if(kind==='video'){
     im.style.display='none';
     vd.src=src; vd.style.display='block'; vd.muted=false;
-    try{ vd.currentTime=0; vd.play(); }catch(e){}
+    try{
+      vd.currentTime=0;
+      const playPromise=vd.play();
+      if(playPromise) playPromise.catch(()=>{});
+    }catch(e){}
   } else {
     vd.pause(); vd.style.display='none';
     im.src=src; im.style.display='block';
