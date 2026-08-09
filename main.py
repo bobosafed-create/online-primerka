@@ -811,6 +811,19 @@ def _download_to(url, path):
         raise
 
 
+def _normalize_photo_to_jpeg(path):
+    """Keep the stored HD-photo bytes consistent with its JPEG response type."""
+    from PIL import Image, ImageOps, UnidentifiedImageError
+
+    try:
+        with Image.open(path) as source:
+            image = ImageOps.exif_transpose(source).convert("RGB")
+            image.load()
+    except (UnidentifiedImageError, OSError) as exc:
+        raise RuntimeError("generated photo is not a supported image") from exc
+    image.save(path, "JPEG", quality=95, optimize=True)
+
+
 def _wm_font(size):
     from PIL import ImageFont
     try:
@@ -1184,7 +1197,10 @@ def process_generation_job(job, worker_id):
                   (time.time(), time.time(), task_id, worker_id))
             finish_free_preview(session_hash, True)
         else:
-            _download_to(url, _private_file_path(kind, token))
+            result_path = _private_file_path(kind, token)
+            _download_to(url, result_path)
+            if kind == "photo":
+                _normalize_photo_to_jpeg(result_path)
             finish_generation(task_id, True)
     except Exception as e:
         if kind == "free_preview":

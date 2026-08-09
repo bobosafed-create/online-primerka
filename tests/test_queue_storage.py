@@ -71,7 +71,7 @@ class QueueAndStorageTests(unittest.TestCase):
         job = self.app.claim_generation_job("worker-test")
 
         def fake_download(_url, path):
-            Image.new("RGB", (8, 8), (20, 40, 60)).save(path, "JPEG")
+            Image.new("RGBA", (8, 8), (20, 40, 60, 255)).save(path, "PNG")
 
         with patch.object(self.app, "_generate", return_value="https://provider.test/result.jpg"), \
              patch.object(self.app, "_download_to", side_effect=fake_download):
@@ -80,9 +80,12 @@ class QueueAndStorageTests(unittest.TestCase):
         status = self.app.task_status(job_id)
         self.assertEqual("done", status["status"])
         self.assertEqual("photo", status["kind"])
-        self.assertTrue(self.app._private_file_path("photo", token))
+        result_path = self.app._private_file_path("photo", token)
+        self.assertTrue(result_path)
+        with Image.open(result_path) as result:
+            self.assertEqual("JPEG", result.format)
         self.assertEqual(0, self.app.get_code(code)["credits_left"])
-        pathlib.Path(self.app._private_file_path("photo", token)).unlink(missing_ok=True)
+        pathlib.Path(result_path).unlink(missing_ok=True)
 
     def test_signed_file_link_rejects_tampering_and_expiry(self):
         token = uuid.uuid4().hex
