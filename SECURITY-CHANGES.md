@@ -54,4 +54,4 @@ CSRF enforcement, concurrent database rate limiting, and migration versioning.
 
 - S3-compatible private object storage for a future multi-host deployment.
 - PostgreSQL integration tests and a live YooKassa sandbox transaction on an isolated staging site.
-- Alembic migrations and CI/CD.
+- Alembic migrations and an explicitly approved manual deployment workflow.

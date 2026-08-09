@@ -108,8 +108,13 @@ class AdminSecurityTests(unittest.TestCase):
         self.assertEqual(list(range(1, 11)), sorted(item["hits"] for item in results))
 
     def test_proxy_ip_ignores_client_prepended_value(self):
-        request = RequestStub(headers={"x-forwarded-for": "203.0.113.9, 198.51.100.7"})
-        self.assertEqual("198.51.100.7", self.app._client_ip(request))
+        old_value = self.app.TRUST_PROXY_HEADERS
+        self.app.TRUST_PROXY_HEADERS = True
+        try:
+            request = RequestStub(headers={"x-forwarded-for": "203.0.113.9, 198.51.100.7"})
+            self.assertEqual("198.51.100.7", self.app._client_ip(request))
+        finally:
+            self.app.TRUST_PROXY_HEADERS = old_value
 
     def test_schema_migrations_are_versioned(self):
         rows = self.app.dbrun("SELECT version FROM schema_migrations ORDER BY version", (), "all")

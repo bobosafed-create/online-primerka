@@ -259,7 +259,7 @@ def init_db():
         apply_migrations()
     except Exception as exc:
         print("init_db failed:", exc)
-        if APP_ENV == "production":
+        if APP_ENV in {"staging", "production"}:
             raise
 
 

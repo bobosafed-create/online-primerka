@@ -109,3 +109,25 @@ python -m pip check
 6. Проверьте расход и возврат кредита при успешной и неуспешной генерации.
 
 Тестовые ключи нельзя сохранять в `.env`, GitHub, скриншотах или переписке. Автоматический deployment этим репозиторием не выполняется.
+
+## Проверка конфигурации staging
+
+Preflight не выводит значения секретов и завершает работу с ошибкой при опасной конфигурации:
+
+```text
+python scripts/preflight.py
+python scripts/preflight.py --check-database
+```
+
+Вторая команда только читает `schema_migrations` из указанной PostgreSQL. Выполняйте её после настройки защищённых переменных staging.
+
+Workflow `.github/workflows/tests.yml` запускает unit/SQLite и PostgreSQL integration-тесты. У него есть только право чтения репозитория;
+шагов публикации или deployment в workflow нет.
+
+PostgreSQL integration-тесты можно запускать вручную только на отдельной тестовой базе, имя которой содержит `test`:
+
+```text
+TEST_POSTGRES_URL=postgresql://.../styleglobe_test ALLOW_POSTGRES_TEST_RESET=1 python -m unittest discover -s tests -p "test_postgres_integration.py" -v
+```
+
+Этот тест очищает только перечисленные прикладные таблицы указанной тестовой базы. Никогда не задавайте ему production `DATABASE_URL`.
