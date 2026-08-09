@@ -101,6 +101,12 @@ async function api(path){
   return r.json();
 }
 
+function appendTextCell(row, value){
+  const cell=document.createElement('td');
+  cell.textContent=String(value==null?'':value);
+  row.appendChild(cell);
+}
+
 async function loadAll(){
   const s = await api('/api/admin/stats');
   if(s.db && s.db.indexOf('sqlite')===0){
@@ -130,14 +136,33 @@ async function loadAll(){
     <td>${x.is_test?'тест':''}</td></tr>`).join('') || '<tr><td colspan=6 class="muted">Заказов пока нет</td></tr>';
 
   const fb = await api('/api/admin/feedback');
-  $('fbCounts').innerHTML = Object.keys(fb.counts||{}).length
-    ? Object.entries(fb.counts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="kpi"><div class="v">${v}</div><div class="l">${k}</div></div>`).join('')
-    : '<div class="muted">Ответов пока нет</div>';
+  const countsBox=$('fbCounts'); countsBox.replaceChildren();
+  const counts=Object.entries(fb.counts||{}).sort((a,b)=>b[1]-a[1]);
+  if(counts.length){
+    counts.forEach(([reason,count])=>{
+      const card=document.createElement('div'); card.className='kpi';
+      const value=document.createElement('div'); value.className='v'; value.textContent=String(count);
+      const label=document.createElement('div'); label.className='l'; label.textContent=String(reason);
+      card.append(value,label); countsBox.appendChild(card);
+    });
+  }else{
+    const empty=document.createElement('div'); empty.className='muted'; empty.textContent='Ответов пока нет';
+    countsBox.appendChild(empty);
+  }
   const fbtb = document.querySelector('#fbTable tbody');
-  fbtb.innerHTML = (fb.items||[]).map(x=>`<tr>
-    <td>${(x.created_at||'').replace('T',' ').slice(0,19)}</td>
-    <td>${x.reason||''}</td>
-    <td>${(x.comment||'').replace(/</g,'&lt;')}</td></tr>`).join('') || '<tr><td colspan=3 class="muted">Ответов пока нет</td></tr>';
+  fbtb.replaceChildren();
+  (fb.items||[]).forEach(x=>{
+    const row=document.createElement('tr');
+    appendTextCell(row,(x.created_at||'').replace('T',' ').slice(0,19));
+    appendTextCell(row,x.reason||'');
+    appendTextCell(row,x.comment||'');
+    fbtb.appendChild(row);
+  });
+  if(!(fb.items||[]).length){
+    const row=document.createElement('tr'); const cell=document.createElement('td');
+    cell.colSpan=3; cell.className='muted'; cell.textContent='Ответов пока нет';
+    row.appendChild(cell); fbtb.appendChild(row);
+  }
 }
 
 async function saveSettings(){
