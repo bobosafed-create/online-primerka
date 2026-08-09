@@ -7,7 +7,7 @@ import sys
 from urllib.parse import urlparse
 
 
-REQUIRED_SCHEMA_VERSIONS = [1, 2, 3, 4]
+REQUIRED_SCHEMA_VERSIONS = [1, 2, 3, 4, 5]
 
 
 def _result(level, code, message):

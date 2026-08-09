@@ -53,7 +53,25 @@ class PostgreSQLIntegrationTests(unittest.TestCase):
 
     def test_all_schema_migrations_are_applied(self):
         rows = self.app.dbrun("SELECT version FROM schema_migrations ORDER BY version", (), "all")
-        self.assertEqual([1, 2, 3, 4], [row["version"] for row in rows])
+        self.assertEqual([1, 2, 3, 4, 5], [row["version"] for row in rows])
+        timestamp_columns = {
+            "schema_migrations": ("applied_at",),
+            "free_preview_usage": ("created_at", "updated_at"),
+            "generation_jobs": (
+                "created_at", "finished_at", "available_at", "started_at", "heartbeat_at"
+            ),
+            "admin_sessions": ("created_at", "expires_at", "last_seen"),
+            "rate_limits": ("updated_at",),
+        }
+        for table, columns in timestamp_columns.items():
+            for column in columns:
+                row = self.app.dbrun(
+                    "SELECT data_type FROM information_schema.columns "
+                    "WHERE table_schema=current_schema() AND table_name=? AND column_name=?",
+                    (table, column),
+                    "one",
+                )
+                self.assertEqual("double precision", row["data_type"], f"{table}.{column}")
 
     def test_skip_locked_allows_only_one_worker_claim(self):
         code = self.app.create_code("test", 1, 0)

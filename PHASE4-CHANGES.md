@@ -1,12 +1,15 @@
 # Staging readiness and CI — phase 4
 
-This package is a local development result. It has not been pushed or deployed.
+This branch is intended for test-only CI validation. It must not be deployed automatically.
 
 ## Fail-closed preflight
 
 `python scripts/preflight.py` validates staging/production configuration without printing secret values. It checks
 HTTPS, PostgreSQL, secret strength and separation, payment/AI key presence, private storage and production test-mode
-denial. `--check-database` also performs a read-only connection and verifies schema migration versions 1–4.
+denial. `--check-database` also performs a read-only connection and verifies schema migration versions 1–5.
+
+Migration 5 converts Unix timestamp fields from PostgreSQL `REAL` to `DOUBLE PRECISION`. This prevents newly queued
+jobs from being delayed by the coarse precision of a 4-byte float at current epoch values.
 
 ## PostgreSQL integration suite
 

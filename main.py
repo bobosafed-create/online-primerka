@@ -173,16 +173,16 @@ def apply_migrations():
                     session_hash TEXT PRIMARY KEY,
                     ip_hash TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL )""")
+                    created_at DOUBLE PRECISION NOT NULL,
+                    updated_at DOUBLE PRECISION NOT NULL )""")
         dbrun("CREATE INDEX IF NOT EXISTS idx_free_preview_ip ON free_preview_usage(ip_hash,created_at)")
         dbrun("""CREATE TABLE IF NOT EXISTS generation_jobs(
                     job_id TEXT PRIMARY KEY,
                     code TEXT NOT NULL,
                     kind TEXT NOT NULL,
                     status TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    finished_at REAL,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    finished_at DOUBLE PRECISION,
                     error TEXT )""")
         _mark_migration(2)
 
@@ -190,9 +190,9 @@ def apply_migrations():
         dbrun("""CREATE TABLE IF NOT EXISTS admin_sessions(
                     session_hash TEXT PRIMARY KEY,
                     csrf_hash TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    expires_at REAL NOT NULL,
-                    last_seen REAL NOT NULL,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    expires_at DOUBLE PRECISION NOT NULL,
+                    last_seen DOUBLE PRECISION NOT NULL,
                     ip_hash TEXT NOT NULL,
                     user_agent_hash TEXT NOT NULL )""")
         dbrun("CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at)")
@@ -200,7 +200,7 @@ def apply_migrations():
                     bucket_key TEXT NOT NULL,
                     window_start BIGINT NOT NULL,
                     hits INTEGER NOT NULL,
-                    updated_at REAL NOT NULL,
+                    updated_at DOUBLE PRECISION NOT NULL,
                     PRIMARY KEY(bucket_key,window_start) )""")
         dbrun("CREATE INDEX IF NOT EXISTS idx_rate_limits_updated ON rate_limits(updated_at)")
         _mark_migration(3)
@@ -212,9 +212,9 @@ def apply_migrations():
             "clothes_json": "TEXT",
             "session_hash": "TEXT",
             "attempts": "INTEGER NOT NULL DEFAULT 0",
-            "available_at": "REAL",
-            "started_at": "REAL",
-            "heartbeat_at": "REAL",
+            "available_at": "DOUBLE PRECISION",
+            "started_at": "DOUBLE PRECISION",
+            "heartbeat_at": "DOUBLE PRECISION",
             "worker_id": "TEXT",
         }
         for column, definition in job_columns.items():
@@ -223,6 +223,28 @@ def apply_migrations():
         dbrun("CREATE INDEX IF NOT EXISTS idx_generation_jobs_queue "
               "ON generation_jobs(status,available_at,created_at)")
         _mark_migration(4)
+
+    if not _migration_done(5):
+        # PostgreSQL REAL is a 4-byte float. Unix timestamps near 1.8e9 then
+        # have a resolution of roughly two minutes, which can postpone a job
+        # that was just queued. Keep epoch values at double precision.
+        if USE_PG:
+            timestamp_columns = {
+                "schema_migrations": ("applied_at",),
+                "free_preview_usage": ("created_at", "updated_at"),
+                "generation_jobs": (
+                    "created_at", "finished_at", "available_at", "started_at", "heartbeat_at"
+                ),
+                "admin_sessions": ("created_at", "expires_at", "last_seen"),
+                "rate_limits": ("updated_at",),
+            }
+            for table, columns in timestamp_columns.items():
+                for column in columns:
+                    dbrun(
+                        f"ALTER TABLE {table} ALTER COLUMN {column} "
+                        f"TYPE DOUBLE PRECISION USING {column}::double precision"
+                    )
+        _mark_migration(5)
 
 
 def init_db():
@@ -255,7 +277,7 @@ def init_db():
                     created_at TEXT )""")
         dbrun("""CREATE TABLE IF NOT EXISTS schema_migrations(
                     version INTEGER PRIMARY KEY,
-                    applied_at REAL NOT NULL )""")
+                    applied_at DOUBLE PRECISION NOT NULL )""")
         apply_migrations()
     except Exception as exc:
         print("init_db failed:", exc)
