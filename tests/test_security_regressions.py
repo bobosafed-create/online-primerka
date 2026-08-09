@@ -25,6 +25,8 @@ class SecurityRegressionTests(unittest.TestCase):
             "TEST_ORDER_SECRET": "must-not-work-in-production",
         })
         cls.app = importlib.import_module("main")
+        cls.app.SQLITE_PATH = str(pathlib.Path(cls.temp_dir.name) / "test.db")
+        cls.app.init_db()
 
     @classmethod
     def tearDownClass(cls):

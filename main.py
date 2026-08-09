@@ -47,11 +47,12 @@ YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY", "").strip()
 SITE_URL = os.getenv("SITE_URL", "https://example.twc1.net").rstrip("/")
 CURRENCY = os.getenv("CURRENCY", "RUB")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
-ADMIN_TOKEN = uuid.uuid4().hex
 APP_ENV = os.getenv("APP_ENV", "production").strip().lower()
 ENABLE_TEST_ORDERS = os.getenv("ENABLE_TEST_ORDERS", "0") == "1"
 TEST_ORDER_SECRET = os.getenv("TEST_ORDER_SECRET", "").strip()
-SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip() or ADMIN_PASSWORD
+SESSION_SECRET = os.getenv("SESSION_SECRET", "").strip()
+if APP_ENV == "production" and len(SESSION_SECRET.encode()) < 32:
+    raise RuntimeError("SESSION_SECRET must contain at least 32 bytes in production")
 if not SESSION_SECRET:
     SESSION_SECRET = secrets.token_hex(32)
     print("security warning: SESSION_SECRET is not configured; sessions reset on restart")
@@ -62,6 +63,7 @@ MAX_IMAGE_BYTES = max(256 * 1024, int(os.getenv("MAX_IMAGE_BYTES", str(5 * 1024 
 MAX_IMAGE_PIXELS = max(1_000_000, int(os.getenv("MAX_IMAGE_PIXELS", "20000000")))
 MAX_IMAGE_EDGE = max(512, int(os.getenv("MAX_IMAGE_EDGE", "4096")))
 FILE_TTL_HOURS = max(1, int(os.getenv("FILE_TTL_HOURS", "24")))
+ADMIN_SESSION_HOURS = min(24 * 7, max(1, int(os.getenv("ADMIN_SESSION_HOURS", "12"))))
 METRIKA_ID = os.getenv("METRIKA_ID", "").strip()   # номер счётчика Яндекс.Метрики
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
@@ -91,8 +93,6 @@ os.makedirs(IMG_DIR, exist_ok=True)
 TASKS = {}
 LAST_FILE_CLEANUP = 0.0
 FILE_CLEANUP_LOCK = threading.Lock()
-ADMIN_LOGIN_ATTEMPTS = {}
-ADMIN_LOGIN_LOCK = threading.Lock()
 
 # ------------------------------------------------------- База данных (PG/SQLite)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -132,6 +132,75 @@ def dbrun(sql, params=(), fetch=None):
         return out
 
 
+def _column_exists(table, column):
+    if USE_PG:
+        row = dbrun(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name=? AND column_name=?",
+            (table, column), "one"
+        )
+        return bool(row)
+    rows = dbrun(f"PRAGMA table_info({table})", (), "all") or []
+    return any(row.get("name") == column for row in rows)
+
+
+def _migration_done(version):
+    return bool(dbrun("SELECT 1 FROM schema_migrations WHERE version=?", (version,), "one"))
+
+
+def _mark_migration(version):
+    dbrun("INSERT INTO schema_migrations(version,applied_at) VALUES(?,?)", (version, time.time()))
+
+
+def apply_migrations():
+    if not _migration_done(1):
+        for column in ("video_total", "video_left"):
+            if not _column_exists("codes", column):
+                dbrun(f"ALTER TABLE codes ADD COLUMN {column} INTEGER NOT NULL DEFAULT 0")
+        if not _column_exists("codes", "order_id"):
+            dbrun("ALTER TABLE codes ADD COLUMN order_id TEXT")
+        dbrun("CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_order_id ON codes(order_id)")
+        dbrun("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id)")
+        _mark_migration(1)
+
+    if not _migration_done(2):
+        dbrun("""CREATE TABLE IF NOT EXISTS free_preview_usage(
+                    session_hash TEXT PRIMARY KEY,
+                    ip_hash TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL )""")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_free_preview_ip ON free_preview_usage(ip_hash,created_at)")
+        dbrun("""CREATE TABLE IF NOT EXISTS generation_jobs(
+                    job_id TEXT PRIMARY KEY,
+                    code TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    finished_at REAL,
+                    error TEXT )""")
+        _mark_migration(2)
+
+    if not _migration_done(3):
+        dbrun("""CREATE TABLE IF NOT EXISTS admin_sessions(
+                    session_hash TEXT PRIMARY KEY,
+                    csrf_hash TEXT NOT NULL,
+                    created_at REAL NOT NULL,
+                    expires_at REAL NOT NULL,
+                    last_seen REAL NOT NULL,
+                    ip_hash TEXT NOT NULL,
+                    user_agent_hash TEXT NOT NULL )""")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_admin_sessions_expiry ON admin_sessions(expires_at)")
+        dbrun("""CREATE TABLE IF NOT EXISTS rate_limits(
+                    bucket_key TEXT NOT NULL,
+                    window_start BIGINT NOT NULL,
+                    hits INTEGER NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY(bucket_key,window_start) )""")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_rate_limits_updated ON rate_limits(updated_at)")
+        _mark_migration(3)
+
+
 def init_db():
     try:
         dbrun("""CREATE TABLE IF NOT EXISTS codes(
@@ -143,12 +212,6 @@ def init_db():
                     video_total INTEGER NOT NULL DEFAULT 0,
                     video_left INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT )""")
-        # миграция для уже созданной таблицы (добавляем видео-колонки, если их нет)
-        for col in ("video_total", "video_left"):
-            try:
-                dbrun(f"ALTER TABLE codes ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
-            except Exception:
-                pass
         dbrun("""CREATE TABLE IF NOT EXISTS orders(
                     order_id TEXT PRIMARY KEY,
                     package TEXT,
@@ -166,32 +229,14 @@ def init_db():
                     comment TEXT,
                     visitor_id TEXT,
                     created_at TEXT )""")
-        dbrun("""CREATE TABLE IF NOT EXISTS free_preview_usage(
-                    session_hash TEXT PRIMARY KEY,
-                    ip_hash TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    updated_at REAL NOT NULL )""")
-        dbrun("CREATE INDEX IF NOT EXISTS idx_free_preview_ip ON free_preview_usage(ip_hash,created_at)")
-        dbrun("""CREATE TABLE IF NOT EXISTS generation_jobs(
-                    job_id TEXT PRIMARY KEY,
-                    code TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    created_at REAL NOT NULL,
-                    finished_at REAL,
-                    error TEXT )""")
-        try:
-            dbrun("ALTER TABLE codes ADD COLUMN order_id TEXT")
-        except Exception:
-            pass
-        try:
-            dbrun("CREATE UNIQUE INDEX IF NOT EXISTS idx_codes_order_id ON codes(order_id)")
-            dbrun("CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_payment_id ON orders(payment_id)")
-        except Exception as e:
-            print("unique index migration warning:", e)
-    except Exception as e:
-        print("init_db warning:", e)
+        dbrun("""CREATE TABLE IF NOT EXISTS schema_migrations(
+                    version INTEGER PRIMARY KEY,
+                    applied_at REAL NOT NULL )""")
+        apply_migrations()
+    except Exception as exc:
+        print("init_db failed:", exc)
+        if APP_ENV == "production":
+            raise
 
 
 init_db()
@@ -398,7 +443,7 @@ def tryon_enabled():
 app = FastAPI(title="StyleGlobe Sellers")
 app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL],
                    allow_methods=["GET", "POST"],
-                   allow_headers=["Content-Type", "X-Admin-Token", "X-Test-Order-Secret"])
+                   allow_headers=["Content-Type", "X-CSRF-Token", "X-Test-Order-Secret"])
 
 
 @app.middleware("http")
@@ -415,6 +460,8 @@ async def security_middleware(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(), geolocation=()"
     response.headers["X-Frame-Options"] = "DENY"
+    if request.url.path.startswith("/api/admin"):
+        response.headers["Cache-Control"] = "no-store"
     if not request.cookies.get("sg_session"):
         session_id = secrets.token_hex(16)
         response.set_cookie("sg_session", _signed_session_value(session_id), max_age=31536000,
@@ -710,14 +757,43 @@ def _session_id_from_request(request):
 
 def _client_ip(request):
     if TRUST_PROXY_HEADERS:
-        forwarded = request.headers.get("x-forwarded-for", "").split(",", 1)[0].strip()
+        forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",")]
+        forwarded = [part for part in forwarded if part]
         if forwarded:
-            return forwarded
+            # A single trusted edge proxy appends the actual peer address last.
+            # Taking the first value would let a client prepend an arbitrary IP.
+            return forwarded[-1]
     return request.client.host if request.client else "unknown"
 
 
 def _private_hash(label, value):
     return hmac.new(SESSION_SECRET.encode(), f"{label}:{value}".encode(), hashlib.sha256).hexdigest()
+
+
+def consume_rate_limit(namespace, subject, limit, window_seconds):
+    """Atomically consumes a shared database-backed rate-limit slot."""
+    now = time.time()
+    window_start = int(now // window_seconds) * int(window_seconds)
+    bucket_key = _private_hash("rate-limit", f"{namespace}:{subject}")
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        cur.execute(_sql("DELETE FROM rate_limits WHERE updated_at<?"), (now - 7 * 86400,))
+        cur.execute(_sql(
+            "INSERT INTO rate_limits(bucket_key,window_start,hits,updated_at) VALUES(?,?,1,?) "
+            "ON CONFLICT(bucket_key,window_start) DO UPDATE SET "
+            "hits=rate_limits.hits+1,updated_at=excluded.updated_at RETURNING hits"
+        ), (bucket_key, window_start, now))
+        row = _row_dict(cur.fetchone(), cur)
+        conn.commit()
+    hits = int(row["hits"])
+    retry_after = max(1, window_start + int(window_seconds) - int(now))
+    return {"allowed": hits <= int(limit), "hits": hits, "retry_after": retry_after}
+
+
+def clear_rate_limit(namespace, subject):
+    bucket_key = _private_hash("rate-limit", f"{namespace}:{subject}")
+    dbrun("DELETE FROM rate_limits WHERE bucket_key=?", (bucket_key,))
 
 
 def reserve_free_preview(session_hash, ip_hash):
@@ -1062,31 +1138,95 @@ class SettingsIn(BaseModel):
     test_mode: Optional[bool] = None
 
 
-def require_admin(request: Request):
+ADMIN_COOKIE_NAME = "sg_admin"
+
+
+def _set_admin_cookie(response, token):
+    response.set_cookie(
+        ADMIN_COOKIE_NAME,
+        token,
+        max_age=ADMIN_SESSION_HOURS * 3600,
+        httponly=True,
+        secure=SITE_URL.startswith("https://"),
+        samesite="strict",
+        path="/",
+    )
+
+
+def _create_admin_session(request):
+    token = secrets.token_urlsafe(32)
+    csrf_token = secrets.token_urlsafe(32)
+    now = time.time()
+    dbrun("DELETE FROM admin_sessions WHERE expires_at<?", (now,))
+    dbrun(
+        "INSERT INTO admin_sessions(session_hash,csrf_hash,created_at,expires_at,last_seen,ip_hash,user_agent_hash) "
+        "VALUES(?,?,?,?,?,?,?)",
+        (
+            _private_hash("admin-session", token),
+            _private_hash("admin-csrf", csrf_token),
+            now,
+            now + ADMIN_SESSION_HOURS * 3600,
+            now,
+            _private_hash("admin-ip", _client_ip(request)),
+            _private_hash("admin-user-agent", request.headers.get("user-agent", "")[:500]),
+        ),
+    )
+    return token, csrf_token
+
+
+def require_admin(request: Request, require_csrf=False):
     if not ADMIN_PASSWORD:
         raise HTTPException(503, "Админка не настроена: задайте ADMIN_PASSWORD")
-    if request.headers.get("x-admin-token", "") != ADMIN_TOKEN:
+    token = request.cookies.get(ADMIN_COOKIE_NAME, "")
+    session_hash = _private_hash("admin-session", token)
+    session = dbrun("SELECT * FROM admin_sessions WHERE session_hash=?", (session_hash,), "one")
+    now = time.time()
+    if not session or float(session["expires_at"]) <= now:
+        if session:
+            dbrun("DELETE FROM admin_sessions WHERE session_hash=?", (session_hash,))
         raise HTTPException(401, "Требуется вход администратора")
+    if require_csrf:
+        supplied = request.headers.get("x-csrf-token", "")
+        supplied_hash = _private_hash("admin-csrf", supplied)
+        if not hmac.compare_digest(supplied_hash, session["csrf_hash"]):
+            raise HTTPException(403, "Недействительный CSRF-токен")
+    dbrun("UPDATE admin_sessions SET last_seen=? WHERE session_hash=?", (now, session_hash))
+    return session
 
 
 @app.post("/api/admin/login")
-def admin_login(data: AdminLoginIn, request: Request):
+def admin_login(data: AdminLoginIn, request: Request, response: Response):
     if not ADMIN_PASSWORD:
         raise HTTPException(503, "Задайте ADMIN_PASSWORD")
     attempt_key = _private_hash("admin-login", _client_ip(request))
-    now = time.time()
-    with ADMIN_LOGIN_LOCK:
-        recent = [t for t in ADMIN_LOGIN_ATTEMPTS.get(attempt_key, []) if now - t < 900]
-        ADMIN_LOGIN_ATTEMPTS[attempt_key] = recent
-        if len(recent) >= 5:
-            raise HTTPException(429, "Слишком много попыток. Повторите позже.")
+    rate = consume_rate_limit("admin-login", attempt_key, 5, 900)
+    if not rate["allowed"]:
+        raise HTTPException(429, "Слишком много попыток. Повторите позже.",
+                            headers={"Retry-After": str(rate["retry_after"])})
     if not hmac.compare_digest(data.password, ADMIN_PASSWORD):
-        with ADMIN_LOGIN_LOCK:
-            ADMIN_LOGIN_ATTEMPTS.setdefault(attempt_key, []).append(now)
         raise HTTPException(401, "Неверный пароль")
-    with ADMIN_LOGIN_LOCK:
-        ADMIN_LOGIN_ATTEMPTS.pop(attempt_key, None)
-    return {"token": ADMIN_TOKEN}
+    clear_rate_limit("admin-login", attempt_key)
+    token, csrf_token = _create_admin_session(request)
+    _set_admin_cookie(response, token)
+    return {"ok": True, "csrfToken": csrf_token, "expiresIn": ADMIN_SESSION_HOURS * 3600}
+
+
+@app.get("/api/admin/session")
+def admin_session(request: Request):
+    session = require_admin(request)
+    csrf_token = secrets.token_urlsafe(32)
+    dbrun("UPDATE admin_sessions SET csrf_hash=? WHERE session_hash=?",
+          (_private_hash("admin-csrf", csrf_token), session["session_hash"]))
+    return {"ok": True, "csrfToken": csrf_token}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(request: Request, response: Response):
+    session = require_admin(request, require_csrf=True)
+    dbrun("DELETE FROM admin_sessions WHERE session_hash=?", (session["session_hash"],))
+    response.delete_cookie(ADMIN_COOKIE_NAME, path="/", secure=SITE_URL.startswith("https://"),
+                           httponly=True, samesite="strict")
+    return {"ok": True}
 
 
 @app.get("/api/admin/stats")
@@ -1123,7 +1263,7 @@ def admin_feedback(request: Request):
 
 @app.post("/api/admin/settings")
 def admin_settings(request: Request, data: SettingsIn):
-    require_admin(request)
+    require_admin(request, require_csrf=True)
     if data.test_mode is not None:
         if APP_ENV == "production" and data.test_mode:
             raise HTTPException(403, "Тестовый режим запрещён в production")

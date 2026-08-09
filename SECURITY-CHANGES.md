@@ -1,4 +1,4 @@
-# Security stabilization — phase 1
+# Security stabilization — phases 1–2
 
 This package is a local development result. It has not been deployed.
 
@@ -18,6 +18,12 @@ This package is a local development result. It has not been deployed.
 - YooKassa success accepted without binding payment ID, order ID, amount, currency and paid flag.
 - YooKassa webhook trusted client-supplied metadata instead of the stored payment ID.
 - Payment creation used an unrelated idempotency key and did not handle incomplete provider responses.
+- Process-local reusable admin bearer token replaced with expiring server-side sessions.
+- Admin session cookie is `HttpOnly`, `Secure` on HTTPS and `SameSite=Strict`.
+- State-changing admin requests require a rotating CSRF token; logout revokes the database session.
+- Admin login rate limiting is atomic and shared through the database.
+- Schema changes are versioned in `schema_migrations`; production startup fails closed on migration errors.
+- Admin API responses are marked `Cache-Control: no-store`.
 
 ## Validation
 
@@ -31,7 +37,8 @@ python -m pip check
 The included regression suite covers concurrent access-code issuance, atomic credit reservations,
 refund idempotency, interrupted-job recovery, free-preview reservation, production test-order denial,
 admin feedback escaping, feedback allowlisting, image decoding/re-encoding, YooKassa request binding,
-payment verification, forged metadata rejection, and duplicate webhook idempotency.
+payment verification, forged metadata rejection, duplicate webhook idempotency, admin session persistence,
+CSRF enforcement, concurrent database rate limiting, and migration versioning.
 
 ## Deployment prerequisites
 
@@ -47,7 +54,5 @@ payment verification, forged metadata rejection, and duplicate webhook idempoten
 
 - External durable generation queue and worker.
 - Private object storage with authorized or signed downloads.
-- Persistent server-side admin sessions and CSRF protection.
-- Distributed rate limiting.
 - PostgreSQL integration tests and a live YooKassa sandbox transaction on an isolated staging site.
 - Alembic migrations and CI/CD.
