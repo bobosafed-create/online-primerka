@@ -25,7 +25,7 @@ import hashlib
 import hmac
 import io
 import re
-from contextlib import closing
+from contextlib import asynccontextmanager, closing
 from decimal import Decimal, InvalidOperation
 
 import requests
@@ -64,6 +64,10 @@ MAX_IMAGE_PIXELS = max(1_000_000, int(os.getenv("MAX_IMAGE_PIXELS", "20000000"))
 MAX_IMAGE_EDGE = max(512, int(os.getenv("MAX_IMAGE_EDGE", "4096")))
 FILE_TTL_HOURS = max(1, int(os.getenv("FILE_TTL_HOURS", "24")))
 ADMIN_SESSION_HOURS = min(24 * 7, max(1, int(os.getenv("ADMIN_SESSION_HOURS", "12"))))
+MAX_RESULT_BYTES = max(5 * 1024 * 1024, int(os.getenv("MAX_RESULT_BYTES", str(100 * 1024 * 1024))))
+EMBEDDED_WORKER = os.getenv("EMBEDDED_WORKER", "1") == "1"
+WORKER_POLL_SECONDS = max(0.2, float(os.getenv("WORKER_POLL_SECONDS", "1")))
+WORKER_STALE_SECONDS = max(300, int(os.getenv("WORKER_STALE_SECONDS", "900")))
 METRIKA_ID = os.getenv("METRIKA_ID", "").strip()   # номер счётчика Яндекс.Метрики
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
@@ -88,11 +92,12 @@ if _YK and YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
     Configuration.secret_key = YOOKASSA_SECRET_KEY
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-IMG_DIR = os.path.join(tempfile.gettempdir(), "seller_imgs")
+IMG_DIR = os.path.abspath(os.getenv("IMAGE_DIR", "").strip() or os.path.join(tempfile.gettempdir(), "seller_imgs"))
 os.makedirs(IMG_DIR, exist_ok=True)
-TASKS = {}
 LAST_FILE_CLEANUP = 0.0
 FILE_CLEANUP_LOCK = threading.Lock()
+WORKER_START_LOCK = threading.Lock()
+WORKER_THREAD = None
 
 # ------------------------------------------------------- База данных (PG/SQLite)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
@@ -199,6 +204,25 @@ def apply_migrations():
                     PRIMARY KEY(bucket_key,window_start) )""")
         dbrun("CREATE INDEX IF NOT EXISTS idx_rate_limits_updated ON rate_limits(updated_at)")
         _mark_migration(3)
+
+    if not _migration_done(4):
+        job_columns = {
+            "token": "TEXT",
+            "mannequin": "INTEGER",
+            "clothes_json": "TEXT",
+            "session_hash": "TEXT",
+            "attempts": "INTEGER NOT NULL DEFAULT 0",
+            "available_at": "REAL",
+            "started_at": "REAL",
+            "heartbeat_at": "REAL",
+            "worker_id": "TEXT",
+        }
+        for column, definition in job_columns.items():
+            if not _column_exists("generation_jobs", column):
+                dbrun(f"ALTER TABLE generation_jobs ADD COLUMN {column} {definition}")
+        dbrun("CREATE INDEX IF NOT EXISTS idx_generation_jobs_queue "
+              "ON generation_jobs(status,available_at,created_at)")
+        _mark_migration(4)
 
 
 def init_db():
@@ -365,10 +389,11 @@ def spend_video(code):
     return row.get("video_left") if row else None
 
 
-def reserve_generation(code, kind, job_id):
-    """Atomically reserves one credit and creates a durable job record."""
+def reserve_generation(code, kind, job_id, token=None, mannequin=None, clothes=None):
+    """Atomically reserves one credit and enqueues a durable generation job."""
     code = (code or "").strip().upper()
     column = "video_left" if kind == "video" else "credits_left"
+    now = time.time()
     with closing(_conn()) as conn:
         _begin(conn)
         cur = _cursor(conn)
@@ -380,8 +405,10 @@ def reserve_generation(code, kind, job_id):
         if not row:
             conn.rollback()
             return None
-        cur.execute(_sql("INSERT INTO generation_jobs(job_id,code,kind,status,created_at) VALUES(?,?,?,?,?)"),
-                    (job_id, code, kind, "processing", time.time()))
+        cur.execute(_sql(
+            "INSERT INTO generation_jobs(job_id,code,kind,status,created_at,available_at,token,mannequin,clothes_json) "
+            "VALUES(?,?,?,?,?,?,?,?,?)"
+        ), (job_id, code, kind, "queued", now, now, token, mannequin, json.dumps(clothes or [])))
         conn.commit()
         return {"credits_left": int(row["credits_left"]), "video_left": int(row["video_left"])}
 
@@ -394,7 +421,7 @@ def finish_generation(job_id, succeeded, error=None):
         lock = " FOR UPDATE" if USE_PG else ""
         cur.execute(_sql("SELECT * FROM generation_jobs WHERE job_id=?" + lock), (job_id,))
         job = _row_dict(cur.fetchone(), cur)
-        if not job or job["status"] != "processing":
+        if not job or job["status"] not in ("queued", "processing"):
             conn.rollback()
             return False
         if succeeded:
@@ -409,17 +436,69 @@ def finish_generation(job_id, succeeded, error=None):
         return True
 
 
-def recover_interrupted_generations():
-    """Refunds jobs left by a previous single-process server instance."""
-    rows = dbrun("SELECT job_id FROM generation_jobs WHERE status='processing'", (), "all") or []
+def enqueue_free_preview(job_id, token, mannequin, clothes, session_hash):
+    now = time.time()
+    dbrun(
+        "INSERT INTO generation_jobs(job_id,code,kind,status,created_at,available_at,token,mannequin,clothes_json,session_hash) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
+        (job_id, "", "free_preview", "queued", now, now, token, mannequin,
+         json.dumps(clothes or []), session_hash),
+    )
+
+
+def claim_generation_job(worker_id):
+    """Claims at most one queued job across all web/worker processes."""
+    now = time.time()
+    with closing(_conn()) as conn:
+        _begin(conn)
+        cur = _cursor(conn)
+        lock = " FOR UPDATE SKIP LOCKED" if USE_PG else ""
+        cur.execute(_sql(
+            "SELECT * FROM generation_jobs WHERE status='queued' AND COALESCE(available_at,created_at)<=? "
+            "ORDER BY created_at LIMIT 1" + lock
+        ), (now,))
+        job = _row_dict(cur.fetchone(), cur)
+        if not job:
+            conn.rollback()
+            return None
+        cur.execute(_sql(
+            "UPDATE generation_jobs SET status='processing',started_at=?,heartbeat_at=?,worker_id=?,attempts=attempts+1 "
+            "WHERE job_id=? AND status='queued'"
+        ), (now, now, worker_id, job["job_id"]))
+        if cur.rowcount != 1:
+            conn.rollback()
+            return None
+        conn.commit()
+        job.update({"status": "processing", "started_at": now, "heartbeat_at": now, "worker_id": worker_id})
+        return job
+
+
+def heartbeat_generation(job_id, worker_id):
+    dbrun("UPDATE generation_jobs SET heartbeat_at=? WHERE job_id=? AND worker_id=? AND status='processing'",
+          (time.time(), job_id, worker_id))
+
+
+def recover_interrupted_generations(stale_seconds=None):
+    """Refunds only abandoned processing jobs; queued jobs remain available."""
+    cutoff = time.time() - int(stale_seconds or WORKER_STALE_SECONDS)
+    rows = dbrun(
+        "SELECT job_id,kind,session_hash FROM generation_jobs WHERE status='processing' "
+        "AND COALESCE(heartbeat_at,started_at,created_at)<?",
+        (cutoff,), "all"
+    ) or []
     recovered = 0
     for row in rows:
-        if finish_generation(row["job_id"], False, "server restarted before completion"):
+        if row["kind"] == "free_preview":
+            changed = dbrun(
+                "UPDATE generation_jobs SET status='error',finished_at=?,error=? "
+                "WHERE job_id=? AND status='processing'",
+                (time.time(), "worker stopped before completion", row["job_id"]),
+            )
+            finish_free_preview(row.get("session_hash"), False)
+            recovered += 1
+        elif finish_generation(row["job_id"], False, "worker stopped before completion"):
             recovered += 1
     return recovered
-
-
-RECOVERED_GENERATIONS = recover_interrupted_generations()
 
 
 # ---------------------------------------------------------------- Манекены ----
@@ -440,7 +519,13 @@ def tryon_enabled():
 
 
 # -------------------------------------------------------------- Приложение ----
-app = FastAPI(title="StyleGlobe Sellers")
+@asynccontextmanager
+async def app_lifespan(_app):
+    start_embedded_worker()
+    yield
+
+
+app = FastAPI(title="StyleGlobe Sellers", lifespan=app_lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL],
                    allow_methods=["GET", "POST"],
                    allow_headers=["Content-Type", "X-CSRF-Token", "X-Test-Order-Secret"])
@@ -537,7 +622,15 @@ def sitemap_xml():
 @app.get("/health")
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "db": "postgres" if USE_PG else "sqlite"}
+    queued = dbrun("SELECT COUNT(*) AS n FROM generation_jobs WHERE status='queued'", (), "one") or {"n": 0}
+    processing = dbrun("SELECT COUNT(*) AS n FROM generation_jobs WHERE status='processing'", (), "one") or {"n": 0}
+    return {
+        "status": "ok",
+        "db": "postgres" if USE_PG else "sqlite",
+        "queue": {"queued": int(queued["n"]), "processing": int(processing["n"])},
+        "workerMode": "embedded" if EMBEDDED_WORKER else "external",
+        "embeddedWorkerAlive": bool(WORKER_THREAD and WORKER_THREAD.is_alive()),
+    }
 
 
 @app.get("/model/{n}")
@@ -556,13 +649,43 @@ def asset_file(fname: str):
     raise HTTPException(404, "не найдено")
 
 
-@app.get("/api/img/{token}")
-def serve_img(token: str):
-    safe = "".join(c for c in token if c.isalnum())
-    p = os.path.join(IMG_DIR, safe + ".jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg")
-    raise HTTPException(404, "not found")
+def _file_signature(kind, token, expires):
+    message = f"file:{kind}:{token}:{int(expires)}"
+    return hmac.new(SESSION_SECRET.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+def _signed_file_url(kind, token, expires=None):
+    expires = int(expires or (time.time() + FILE_TTL_HOURS * 3600))
+    signature = _file_signature(kind, token, expires)
+    return f"{SITE_URL}/api/file/{kind}/{token}?exp={expires}&sig={signature}"
+
+
+def _private_file_path(kind, token):
+    if not re.fullmatch(r"[a-f0-9]{32}", token or ""):
+        return None
+    names = {
+        "upload": f"{token}.jpg",
+        "preview": f"prevwm_{token}.jpg",
+        "photo": f"hd_{token}.jpg",
+        "video": f"hd_{token}.mp4",
+    }
+    name = names.get(kind)
+    return os.path.join(IMG_DIR, name) if name else None
+
+
+@app.get("/api/file/{kind}/{token}")
+def serve_private_file(kind: str, token: str, exp: int, sig: str):
+    if exp < int(time.time()) or not hmac.compare_digest(sig, _file_signature(kind, token, exp)):
+        raise HTTPException(403, "link expired or invalid")
+    path = _private_file_path(kind, token)
+    if not path or not os.path.exists(path):
+        raise HTTPException(404, "not found")
+    if kind == "video":
+        return FileResponse(path, media_type="video/mp4", filename="styleglobe-hd.mp4",
+                            content_disposition_type="inline")
+    filename = "styleglobe-hd.jpg" if kind == "photo" else None
+    return FileResponse(path, media_type="image/jpeg", filename=filename,
+                        content_disposition_type="inline")
 
 
 @app.get("/api/config")
@@ -609,7 +732,7 @@ def _save_dataurl(data_url):
         raise ValueError("image cannot be decoded") from exc
     token = uuid.uuid4().hex
     image.save(os.path.join(IMG_DIR, token + ".jpg"), "JPEG", quality=90, optimize=True)
-    return f"{SITE_URL}/api/img/{token}"
+    return _signed_file_url("upload", token)
 
 
 def cleanup_old_files(force=False):
@@ -646,10 +769,24 @@ def _save_garment_urls(garments):
 
 
 def _download_to(url, path):
-    r = requests.get(url, timeout=180)
-    r.raise_for_status()
-    with open(path, "wb") as f:
-        f.write(r.content)
+    total = 0
+    try:
+        with requests.get(url, timeout=180, stream=True) as response:
+            response.raise_for_status()
+            with open(path, "wb") as output:
+                for chunk in response.iter_content(1024 * 1024):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > MAX_RESULT_BYTES:
+                        raise RuntimeError("result file is too large")
+                    output.write(chunk)
+    except Exception:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        raise
 
 
 def _wm_font(size):
@@ -721,13 +858,15 @@ def _wavespeed_poll(poll_url):
     return status, url
 
 
-def _generate(portrait_url, clothes, kind):
+def _generate(portrait_url, clothes, kind, heartbeat=None):
     is_video = (kind == "video")
     model = WAVESPEED_VIDEO_MODEL if is_video else WAVESPEED_PHOTO_MODEL
     pred_id, poll = _wavespeed_create(portrait_url, clothes, model, is_video and TRYON_SEND_DURATION)
     if not poll:
         raise RuntimeError("WaveSpeed: не получен идентификатор задачи")
     for _ in range(100 if is_video else 40):
+        if heartbeat:
+            heartbeat()
         time.sleep(3)
         status, url = _wavespeed_poll(poll)
         if status in ("completed", "succeeded", "success") and url:
@@ -849,22 +988,6 @@ class FreePreviewIn(BaseModel):
     visitorId: str = ""
 
 
-def _run_free_preview(task_id, token, mannequin, clothes, session_hash):
-    TASKS[task_id] = {"status": "processing", "token": token, "error": None}
-    try:
-        portrait = f"{SITE_URL}/model/{mannequin}"
-        url = _generate(portrait, clothes, "photo")
-        hd = os.path.join(IMG_DIR, f"prev_{token}.jpg")
-        _download_to(url, hd)
-        make_transparent_watermark(hd, os.path.join(IMG_DIR, f"prevwm_{token}.jpg"))
-        finish_free_preview(session_hash, True)
-        TASKS[task_id] = {"status": "done", "token": token, "error": None,
-                          "previewUrl": f"/api/preview/{token}"}
-    except Exception as e:
-        finish_free_preview(session_hash, False)
-        TASKS[task_id] = {"status": "error", "token": token, "error": str(e)}
-
-
 @app.post("/api/free-preview")
 def free_preview(data: FreePreviewIn, request: Request):
     if not tryon_enabled():
@@ -884,30 +1007,26 @@ def free_preview(data: FreePreviewIn, request: Request):
         raise HTTPException(429, "Бесплатное превью уже использовано или достигнут суточный лимит.")
     token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
-    TASKS[task_id] = {"status": "processing", "token": token, "error": None}
-    threading.Thread(target=_run_free_preview, args=(task_id, token, mannequin, clothes, session_hash),
-                     daemon=True).start()
+    enqueue_free_preview(task_id, token, mannequin, clothes, session_hash)
     response = JSONResponse({"task_id": task_id, "token": token})
     response.set_cookie("sg_session", _signed_session_value(session_id), max_age=31536000,
                         httponly=True, secure=SITE_URL.startswith("https://"), samesite="lax")
     return response
 
 
-@app.get("/api/preview/{token}")
-def serve_preview(token: str):
-    safe = "".join(c for c in token if c.isalnum())
-    p = os.path.join(IMG_DIR, f"prevwm_{safe}.jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg")
-    raise HTTPException(404, "не найдено")
-
-
 @app.get("/api/task/{task_id}")
 def task_status(task_id: str):
-    t = TASKS.get(task_id)
-    if not t:
+    task = dbrun("SELECT * FROM generation_jobs WHERE job_id=?", (task_id,), "one")
+    if not task:
         raise HTTPException(404, "Задача не найдена")
-    return t
+    base = {"token": task.get("token"), "kind": task.get("kind"), "error": None}
+    if task["status"] in ("queued", "processing"):
+        return {**base, "status": "processing"}
+    if task["status"] == "succeeded":
+        if task["kind"] == "free_preview":
+            return {**base, "status": "done", "previewUrl": _signed_file_url("preview", task["token"])}
+        return {**base, "status": "done", "url": _signed_file_url(task["kind"], task["token"])}
+    return {**base, "status": "error", "error": "Генерация не завершена. Попробуйте ещё раз."}
 
 
 # ---------------------------------------------------------- Покупка пакета ----
@@ -1016,31 +1135,72 @@ class GenerateIn(BaseModel):
     garments: List[str] = []
 
 
-def _run_hd(task_id, token, mannequin, clothes, kind):
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
+def process_generation_job(job, worker_id):
+    task_id = job["job_id"]
+    token = job.get("token")
+    kind = job["kind"]
+    session_hash = job.get("session_hash")
     try:
-        portrait = f"{SITE_URL}/model/{mannequin}"
-        url = _generate(portrait, clothes, kind)
-        if kind == "photo":
-            _download_to(url, os.path.join(IMG_DIR, f"hd_{token}.jpg"))
-            TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
-                              "error": None, "url": f"/api/hd/{token}.jpg"}
+        clothes = json.loads(job.get("clothes_json") or "[]")
+        if not isinstance(clothes, list) or not clothes:
+            raise RuntimeError("job has no garment images")
+        portrait = f"{SITE_URL}/model/{int(job.get('mannequin') or 1)}"
+        heartbeat = lambda: heartbeat_generation(task_id, worker_id)
+        provider_kind = "photo" if kind == "free_preview" else kind
+        url = _generate(portrait, clothes, provider_kind, heartbeat=heartbeat)
+        heartbeat()
+        if kind == "free_preview":
+            raw_path = os.path.join(IMG_DIR, f"prev_{token}.jpg")
+            _download_to(url, raw_path)
+            make_transparent_watermark(raw_path, _private_file_path("preview", token))
+            try:
+                os.remove(raw_path)
+            except OSError:
+                pass
+            dbrun("UPDATE generation_jobs SET status='succeeded',finished_at=?,heartbeat_at=? "
+                  "WHERE job_id=? AND status='processing' AND worker_id=?",
+                  (time.time(), time.time(), task_id, worker_id))
+            finish_free_preview(session_hash, True)
         else:
-            TASKS[task_id] = {"status": "done", "token": token, "kind": "video",
-                              "error": None, "url": url}
-        finish_generation(task_id, True)
+            _download_to(url, _private_file_path(kind, token))
+            finish_generation(task_id, True)
     except Exception as e:
-        finish_generation(task_id, False, e)
-        TASKS[task_id] = {"status": "error", "token": token, "kind": kind, "error": str(e)}
+        if kind == "free_preview":
+            dbrun("UPDATE generation_jobs SET status='error',finished_at=?,error=? "
+                  "WHERE job_id=? AND status='processing'",
+                  (time.time(), str(e)[:500], task_id))
+            finish_free_preview(session_hash, False)
+        else:
+            finish_generation(task_id, False, e)
 
 
-@app.get("/api/hd/{name}")
-def serve_hd(name: str):
-    safe = "".join(c for c in name.replace(".jpg", "") if c.isalnum())
-    p = os.path.join(IMG_DIR, f"hd_{safe}.jpg")
-    if os.path.exists(p):
-        return FileResponse(p, media_type="image/jpeg", filename="styleglobe-hd.jpg")
-    raise HTTPException(404, "не найдено")
+def worker_once(worker_id=None):
+    worker_id = worker_id or f"worker-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    job = claim_generation_job(worker_id)
+    if not job:
+        return False
+    process_generation_job(job, worker_id)
+    return True
+
+
+def run_worker_forever(stop_event=None):
+    stop_event = stop_event or threading.Event()
+    worker_id = f"worker-{os.getpid()}-{uuid.uuid4().hex[:8]}"
+    recover_interrupted_generations()
+    while not stop_event.is_set():
+        if not worker_once(worker_id):
+            stop_event.wait(WORKER_POLL_SECONDS)
+
+
+def start_embedded_worker():
+    global WORKER_THREAD
+    if not EMBEDDED_WORKER:
+        return
+    with WORKER_START_LOCK:
+        if WORKER_THREAD and WORKER_THREAD.is_alive():
+            return
+        WORKER_THREAD = threading.Thread(target=run_worker_forever, daemon=True, name="generation-worker")
+        WORKER_THREAD.start()
 
 
 @app.post("/api/generate")
@@ -1067,12 +1227,9 @@ def generate_hd(data: GenerateIn):
         available_mannequins()[0]["id"] if available_mannequins() else 1)
     token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
-    balances = reserve_generation(data.code, kind, task_id)
+    balances = reserve_generation(data.code, kind, task_id, token, mannequin, clothes)
     if balances is None:
         raise HTTPException(402, "Генерации закончились")
-    TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
-    threading.Thread(target=_run_hd, args=(task_id, token, mannequin, clothes, kind),
-                     daemon=True).start()
     return {"task_id": task_id, "kind": kind,
             "creditsLeft": balances["credits_left"],
             "photoLeft": balances["credits_left"],

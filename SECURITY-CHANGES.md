@@ -45,14 +45,13 @@ CSRF enforcement, concurrent database rate limiting, and migration versioning.
 1. Review the database backup and migration plan.
 2. Set all required production environment variables from `.env.example`.
 3. Keep `APP_ENV=production`, `ENABLE_TEST_ORDERS=0`.
-4. Use exactly one Uvicorn worker until an external queue is introduced.
+4. Use `EMBEDDED_WORKER=1`, or run `python worker.py` with the same PostgreSQL and private `IMAGE_DIR`.
 5. Run tests against a staging PostgreSQL database and YooKassa sandbox.
 6. Have the updated privacy wording reviewed before publication.
 7. Deploy only after explicit owner approval and keep the previous release available for rollback.
 
-## Still recommended for phase 2
+## Still recommended after phase 3
 
-- External durable generation queue and worker.
-- Private object storage with authorized or signed downloads.
+- S3-compatible private object storage for a future multi-host deployment.
 - PostgreSQL integration tests and a live YooKassa sandbox transaction on an isolated staging site.
 - Alembic migrations and CI/CD.

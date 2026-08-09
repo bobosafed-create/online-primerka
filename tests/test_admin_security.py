@@ -113,7 +113,7 @@ class AdminSecurityTests(unittest.TestCase):
 
     def test_schema_migrations_are_versioned(self):
         rows = self.app.dbrun("SELECT version FROM schema_migrations ORDER BY version", (), "all")
-        self.assertEqual([1, 2, 3], [row["version"] for row in rows])
+        self.assertEqual([1, 2, 3, 4], [row["version"] for row in rows])
 
     def test_legacy_database_migrates_without_losing_orders_or_codes(self):
         old_path = self.app.SQLITE_PATH
@@ -143,7 +143,7 @@ class AdminSecurityTests(unittest.TestCase):
                 columns = self.app.dbrun("PRAGMA table_info(codes)", (), "all")
                 self.assertIn("order_id", {row["name"] for row in columns})
                 versions = self.app.dbrun("SELECT version FROM schema_migrations ORDER BY version", (), "all")
-                self.assertEqual([1, 2, 3], [row["version"] for row in versions])
+                self.assertEqual([1, 2, 3, 4], [row["version"] for row in versions])
             finally:
                 self.app.SQLITE_PATH = old_path
                 self.app.init_db()

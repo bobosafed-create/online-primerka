@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 import uuid
+from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 
@@ -78,7 +79,9 @@ class SecurityRegressionTests(unittest.TestCase):
         code = self.app.create_code("test", 1, 0)
         job_id = uuid.uuid4().hex
         self.assertIsNotNone(self.app.reserve_generation(code, "photo", job_id))
-        self.assertEqual(1, self.app.recover_interrupted_generations())
+        self.assertIsNotNone(self.app.claim_generation_job("dead-worker"))
+        self.app.dbrun("UPDATE generation_jobs SET heartbeat_at=0 WHERE job_id=?", (job_id,))
+        self.assertEqual(1, self.app.recover_interrupted_generations(stale_seconds=1))
         self.assertEqual(1, self.app.get_code(code)["credits_left"])
 
     def test_free_preview_session_is_reserved_once(self):
@@ -116,7 +119,7 @@ class SecurityRegressionTests(unittest.TestCase):
         image.save(payload, "PNG")
         data_url = "data:image/png;base64," + base64.b64encode(payload.getvalue()).decode()
         url = self.app._save_dataurl(data_url)
-        token = url.rsplit("/", 1)[-1]
+        token = urlparse(url).path.rsplit("/", 1)[-1]
         path = pathlib.Path(self.app.IMG_DIR) / f"{token}.jpg"
         try:
             self.assertTrue(path.exists())

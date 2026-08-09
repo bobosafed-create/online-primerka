@@ -371,7 +371,7 @@ async function startFreePreview(){
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
     const d=await r.json(); const tok=d.token;
     pollTask(d.task_id,40,(res)=>{ $('freeProgress').style.display='none';
-      $('previewImg').src=(res.previewUrl||('/api/preview/'+tok))+'?t='+Date.now();
+      $('previewImg').src=res.previewUrl;
       $('previewResult').style.display='block'; $('freeBtn').disabled=false;
       goal('preview_created');
       $('survey').style.display='block';
