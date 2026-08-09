@@ -29,9 +29,10 @@ from contextlib import asynccontextmanager, closing
 from decimal import Decimal, InvalidOperation
 
 import requests
+import boto3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List
 
@@ -74,6 +75,11 @@ WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
 WAVESPEED_PHOTO_MODEL = os.getenv("WAVESPEED_PHOTO_MODEL", "wavespeed-ai/ai-clothes-changer").strip()
 WAVESPEED_BASE = os.getenv("WAVESPEED_BASE", "https://api.wavespeed.ai/api/v3").rstrip("/")
+S3_ENDPOINT_URL = os.getenv("S3_ENDPOINT_URL", "").strip()
+S3_BUCKET = os.getenv("S3_BUCKET", "").strip()
+S3_ACCESS_KEY = os.getenv("S3_ACCESS_KEY", "").strip()
+S3_SECRET_KEY = os.getenv("S3_SECRET_KEY", "").strip()
+S3_REGION = os.getenv("S3_REGION", "ru-1").strip()
 TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
 TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
@@ -695,13 +701,55 @@ def _private_file_path(kind, token):
     return os.path.join(IMG_DIR, name) if name else None
 
 
+def s3_enabled():
+    return bool(S3_ENDPOINT_URL and S3_BUCKET and S3_ACCESS_KEY and S3_SECRET_KEY)
+
+
+def _s3_client():
+    return boto3.client("s3", endpoint_url=S3_ENDPOINT_URL, region_name=S3_REGION,
+                        aws_access_key_id=S3_ACCESS_KEY, aws_secret_access_key=S3_SECRET_KEY)
+
+
+def _s3_key(kind, token):
+    path = _private_file_path(kind, token)
+    return f"media/{os.path.basename(path)}" if path else None
+
+
+def _upload_private_file(kind, token, path):
+    key = _s3_key(kind, token)
+    if not key:
+        raise RuntimeError("invalid private file key")
+    content_type = "video/mp4" if kind == "video" else "image/jpeg"
+    _s3_client().upload_file(path, S3_BUCKET, key, ExtraArgs={"ContentType": content_type})
+
+
+def _private_file_exists(kind, token):
+    if not s3_enabled():
+        path = _private_file_path(kind, token)
+        return bool(path and os.path.exists(path))
+    try:
+        _s3_client().head_object(Bucket=S3_BUCKET, Key=_s3_key(kind, token))
+        return True
+    except Exception:
+        return False
+
+
 @app.get("/api/file/{kind}/{token}")
 def serve_private_file(kind: str, token: str, exp: int, sig: str):
     if exp < int(time.time()) or not hmac.compare_digest(sig, _file_signature(kind, token, exp)):
         raise HTTPException(403, "link expired or invalid")
     path = _private_file_path(kind, token)
-    if not path or not os.path.exists(path):
+    if not path or not _private_file_exists(kind, token):
         raise HTTPException(404, "not found")
+    if s3_enabled():
+        try:
+            obj = _s3_client().get_object(Bucket=S3_BUCKET, Key=_s3_key(kind, token))
+        except Exception as exc:
+            raise HTTPException(404, "not found") from exc
+        media_type = "video/mp4" if kind == "video" else "image/jpeg"
+        filename = "styleglobe-hd.mp4" if kind == "video" else "styleglobe-hd.jpg"
+        return StreamingResponse(obj["Body"].iter_chunks(), media_type=media_type,
+                                 headers={"Content-Disposition": f'inline; filename="{filename}"'})
     if kind == "video":
         return FileResponse(path, media_type="video/mp4", filename="styleglobe-hd.mp4",
                             content_disposition_type="inline")
@@ -753,7 +801,11 @@ def _save_dataurl(data_url):
     except (UnidentifiedImageError, OSError) as exc:
         raise ValueError("image cannot be decoded") from exc
     token = uuid.uuid4().hex
-    image.save(os.path.join(IMG_DIR, token + ".jpg"), "JPEG", quality=90, optimize=True)
+    upload_path = os.path.join(IMG_DIR, token + ".jpg")
+    image.save(upload_path, "JPEG", quality=90, optimize=True)
+    if s3_enabled():
+        _upload_private_file("upload", token, upload_path)
+        os.remove(upload_path)
     return _signed_file_url("upload", token)
 
 
@@ -1188,6 +1240,9 @@ def process_generation_job(job, worker_id):
             raw_path = os.path.join(IMG_DIR, f"prev_{token}.jpg")
             _download_to(url, raw_path)
             make_transparent_watermark(raw_path, _private_file_path("preview", token))
+            if s3_enabled():
+                _upload_private_file("preview", token, _private_file_path("preview", token))
+                os.remove(_private_file_path("preview", token))
             try:
                 os.remove(raw_path)
             except OSError:
@@ -1201,6 +1256,9 @@ def process_generation_job(job, worker_id):
             _download_to(url, result_path)
             if kind == "photo":
                 _normalize_photo_to_jpeg(result_path)
+            if s3_enabled():
+                _upload_private_file(kind, token, result_path)
+                os.remove(result_path)
             finish_generation(task_id, True)
     except Exception as e:
         if kind == "free_preview":
