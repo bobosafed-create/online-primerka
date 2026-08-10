@@ -25,6 +25,7 @@ from contextlib import closing
 
 import requests
 import smtplib
+import socket
 from email.message import EmailMessage
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -636,6 +637,27 @@ def smtp_ready():
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)
 
 
+def _ipv4_socket(host, port, timeout):
+    """Подключение только по IPv4 (обходит ошибку Errno 99 при отсутствии IPv6)."""
+    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    af, st, proto, _canon, sa = infos[0]
+    s = socket.socket(af, st, proto)
+    s.settimeout(timeout)
+    s.connect(sa)
+    return s
+
+
+class _SMTP4(smtplib.SMTP):
+    def _get_socket(self, host, port, timeout):
+        return _ipv4_socket(host, port, timeout)
+
+
+class _SMTP4SSL(smtplib.SMTP_SSL):
+    def _get_socket(self, host, port, timeout):
+        sock = _ipv4_socket(host, port, timeout)
+        return self.context.wrap_socket(sock, server_hostname=self._host)
+
+
 def _send_email(to, subject, body):
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
@@ -643,11 +665,11 @@ def _send_email(to, subject, body):
     msg["Subject"] = subject
     msg.set_content(body)
     if SMTP_PORT == 465:
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+        with _SMTP4SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
             s.login(SMTP_USER, SMTP_PASSWORD)
             s.send_message(msg)
     else:
-        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+        with _SMTP4(SMTP_HOST, SMTP_PORT, timeout=20) as s:
             s.starttls()
             s.login(SMTP_USER, SMTP_PASSWORD)
             s.send_message(msg)
