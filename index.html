@@ -79,6 +79,10 @@
   .faq p{margin:8px 0 2px;color:#6b6558;font-size:14px;line-height:1.5;}
   .sg-input{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;font-size:14.5px;font-family:inherit;box-sizing:border-box;}
   textarea.sg-input{resize:vertical;}
+  .my-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:14px;}
+  .my-item{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#faf6ef;}
+  .my-item img,.my-item video{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#000;cursor:zoom-in;}
+  .my-item a{display:block;text-align:center;font-size:12.5px;font-weight:800;color:var(--accent);padding:7px 4px;text-decoration:none;}
   .free-badge{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;
               padding:8px 14px;font-size:14px;font-weight:800;}
 
@@ -224,7 +228,8 @@
     <h2><span class="step-num">4</span> Купите пакет генераций</h2>
     <div class="sub">Оплатите пакет — получите код доступа с балансом. По коду создавайте фото в HD без водяного знака.</div>
     <div class="pkg-grid" id="pkgGrid"></div>
-    <button class="btn" id="buyBtn" disabled onclick="buyPackage()" style="margin-top:14px;">Выберите пакет</button>
+    <input type="email" id="buyEmail" class="sg-input" placeholder="Email — пришлём код доступа (рекомендуем)" style="margin-top:12px;">
+    <button class="btn" id="buyBtn" disabled onclick="buyPackage()" style="margin-top:10px;">Выберите пакет</button>
     <div class="err" id="buyErr"></div>
     <div class="sub" style="margin-top:14px;">Уже покупали? Введите код доступа:</div>
     <div class="resume">
@@ -263,6 +268,13 @@
         <img id="genImg" alt="результат" style="display:none;">
         <a class="dl" id="genDl" href="#" download="styleglobe-hd">⬇ Скачать</a>
       </div>
+    </div>
+
+    <div class="card" id="myWorks">
+      <h2>🗂 Мои образы</h2>
+      <div class="sub">Все фото и видео, созданные по этому коду. Можно скачать заново в любой момент.</div>
+      <button class="btn" id="myBtn" onclick="loadMine()" style="margin-top:12px;">Показать мои образы</button>
+      <div class="my-grid" id="myGrid"></div>
     </div>
   </div>
 
@@ -440,6 +452,7 @@ function selectPackage(id){
 async function buyPackage(){
   $('buyErr').textContent='';
   if(!selectedPackage){ $('buyErr').textContent='Выберите пакет.'; return; }
+  const email=($('buyEmail').value||'').trim();
   goal('buy_click');
   // запоминаем уже загруженную вещь и модель, чтобы после оплаты не загружать заново
   try{ sessionStorage.setItem('sg_pending', JSON.stringify({garments:garments(), mannequin:selectedMannequin})); }catch(e){}
@@ -447,14 +460,14 @@ async function buyPackage(){
     $('buyBtn').disabled=true; $('buyBtn').textContent='Создаём платёж…';
     try{
       const r=await fetch('/api/create-payment',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({package:selectedPackage})});
+        body:JSON.stringify({package:selectedPackage, email:email})});
       if(!r.ok) throw new Error('create-payment');
       const d=await r.json(); goal('payment_started'); location.href=d.confirmation_url;
     }catch(e){ $('buyErr').textContent='Не удалось создать платёж.'; $('buyBtn').disabled=false; selectPackage(selectedPackage); }
   } else {
     try{
       const r=await fetch('/api/test-order',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({package:selectedPackage})});
+        body:JSON.stringify({package:selectedPackage, email:email})});
       const d=await r.json(); afterPayment(d.order_id);
     }catch(e){ $('buyErr').textContent='Тестовый режим недоступен.'; }
   }
@@ -549,6 +562,27 @@ async function generate(kind){
       $('genResult').scrollIntoView({behavior:'smooth',block:'start'});
     },(err)=>{ $('genProgress').style.display='none'; $('genErr').textContent='Не удалось: '+err; updateBalance(); });
   }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }
+}
+
+/* ---------- Мои образы (история по коду) ---------- */
+async function loadMine(){
+  if(!currentCode) return;
+  $('myBtn').disabled=true; $('myBtn').textContent='Загружаем…';
+  try{
+    const d=await (await fetch('/api/mine/'+encodeURIComponent(currentCode))).json();
+    const items=d.items||[];
+    if(!items.length){ $('myGrid').innerHTML='<div class="sub">Пока нет созданных образов.</div>'; }
+    else{
+      $('myGrid').innerHTML = items.map(it=>{
+        const url='/api/myfile/'+encodeURIComponent(currentCode)+'/'+it.id;
+        const media = it.kind==='video'
+          ? `<video src="${url}" muted playsinline preload="metadata" onclick="openLB('video','${url}')"></video>`
+          : `<img src="${url}" alt="образ" onclick="openLB('img','${url}')">`;
+        return `<div class="my-item">${media}<a href="${url}" download="styleglobe-${it.kind}">⬇ Скачать</a></div>`;
+      }).join('');
+    }
+  }catch(e){ $('myGrid').innerHTML='<div class="err">Не удалось загрузить.</div>'; }
+  $('myBtn').disabled=false; $('myBtn').textContent='Обновить';
 }
 
 /* ---------- Вопросы и ответы (из базы) ---------- */

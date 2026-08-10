@@ -24,6 +24,8 @@ import tempfile
 from contextlib import closing
 
 import requests
+import smtplib
+from email.message import EmailMessage
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -44,6 +46,13 @@ CURRENCY = os.getenv("CURRENCY", "RUB")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 ADMIN_TOKEN = uuid.uuid4().hex
 METRIKA_ID = os.getenv("METRIKA_ID", "").strip()   # номер счётчика Яндекс.Метрики
+
+# Почта для отправки кода доступа (SMTP). Если не задано — код только на экране.
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or "587")
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER).strip()
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
@@ -155,6 +164,17 @@ def init_db():
                     answer TEXT,
                     sort_order INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT )""")
+        dbrun("""CREATE TABLE IF NOT EXISTS results(
+                    id TEXT PRIMARY KEY,
+                    code TEXT,
+                    kind TEXT,
+                    mimetype TEXT,
+                    data BYTEA,
+                    created_at TEXT )""")
+        try:
+            dbrun("ALTER TABLE orders ADD COLUMN email TEXT")
+        except Exception:
+            pass
     except Exception as e:
         print("init_db warning:", e)
 
@@ -597,8 +617,68 @@ def task_status(task_id: str):
 
 
 # ---------------------------------------------------------- Покупка пакета ----
+# -------------------------------------------------- Хранилище образов / почта --
+def _blob(b):
+    return psycopg2.Binary(b) if USE_PG else sqlite3.Binary(b)
+
+
+def store_result(code, kind, data, mimetype):
+    if not (code and data):
+        return
+    try:
+        dbrun("INSERT INTO results(id,code,kind,mimetype,data,created_at) VALUES(?,?,?,?,?,?)",
+              (uuid.uuid4().hex, code.strip().upper(), kind, mimetype, _blob(data), now_iso()))
+    except Exception as e:
+        print("store_result warn:", e)
+
+
+def smtp_ready():
+    return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)
+
+
+def _send_email(to, subject, body):
+    msg = EmailMessage()
+    msg["From"] = SMTP_FROM
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    if SMTP_PORT == 465:
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+            s.login(SMTP_USER, SMTP_PASSWORD)
+            s.send_message(msg)
+    else:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASSWORD)
+            s.send_message(msg)
+
+
+def send_code_email(to, code, pkg_title):
+    to = (to or "").strip()
+    if not (to and code and smtp_ready()):
+        return
+    subject = "Ваш код доступа — StyleGlobe для селлеров"
+    body = (
+        "Здравствуйте!\n\n"
+        f"Спасибо за покупку пакета «{pkg_title}».\n\n"
+        f"Ваш код доступа: {code}\n\n"
+        "Введите его на сайте в разделе «Уже покупали? Введите код доступа», чтобы создавать "
+        "фото и видео в HD без водяного знака и в любой момент вернуться к своим образам.\n\n"
+        f"Сайт: {SITE_URL}\n\n"
+        "Сохраните это письмо — код нужен для доступа к вашему балансу."
+    )
+
+    def _job():
+        try:
+            _send_email(to, subject, body)
+        except Exception as e:
+            print("send_code_email warn:", e)
+    threading.Thread(target=_job, daemon=True).start()
+
+
 class CreatePaymentIn(BaseModel):
     package: str
+    email: Optional[str] = ""
 
 
 @app.post("/api/create-payment")
@@ -609,8 +689,8 @@ def create_payment(data: CreatePaymentIn):
     if not pkg:
         raise HTTPException(400, "Неизвестный пакет")
     order_id = uuid.uuid4().hex
-    dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,created_at) VALUES(?,?,?,0,0,?)",
-          (order_id, pkg["id"], pkg["price"], now_iso()))
+    dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,email,created_at) VALUES(?,?,?,0,0,?,?)",
+          (order_id, pkg["id"], pkg["price"], (data.email or "").strip()[:160], now_iso()))
     payment = Payment.create({
         "amount": {"value": pkg["price"], "currency": CURRENCY},
         "capture": True,
@@ -630,6 +710,7 @@ def _issue_code_for_order(order):
         return None
     code = create_code(pkg["id"], pkg["count"], pkg["videos"])
     dbrun("UPDATE orders SET code=? WHERE order_id=?", (code, order["order_id"]))
+    send_code_email(order.get("email"), code, pkg.get("title", ""))
     return code
 
 
@@ -668,6 +749,27 @@ def code_info(code: str):
             "hasVideo": int(row.get("video_left") or 0) > 0, "package": row["package"]}
 
 
+@app.get("/api/mine/{code}")
+def my_results(code: str):
+    if not get_code(code):
+        raise HTTPException(404, "Код не найден")
+    items = dbrun("SELECT id,kind,created_at FROM results WHERE code=? ORDER BY created_at DESC",
+                  ((code or "").strip().upper(),), "all") or []
+    return {"items": items}
+
+
+@app.get("/api/myfile/{code}/{rid}")
+def my_file(code: str, rid: str):
+    row = dbrun("SELECT * FROM results WHERE id=? AND code=?",
+                (rid, (code or "").strip().upper()), "one")
+    if not row or row.get("data") is None:
+        raise HTTPException(404, "не найдено")
+    data = bytes(row["data"])
+    ext = "mp4" if row.get("kind") == "video" else "jpg"
+    return Response(content=data, media_type=row.get("mimetype") or "application/octet-stream",
+                    headers={"Content-Disposition": f'inline; filename="styleglobe-{row.get("kind")}.{ext}"'})
+
+
 # ------------------------------------------- Генерация в HD (списание кредита) -
 class GenerateIn(BaseModel):
     code: str
@@ -676,16 +778,28 @@ class GenerateIn(BaseModel):
     garments: List[str] = []
 
 
-def _run_hd(task_id, token, mannequin, clothes, kind):
+def _run_hd(task_id, token, mannequin, clothes, kind, code=None):
     TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
     try:
         portrait = f"{SITE_URL}/model/{mannequin}"
         url = _generate(portrait, clothes, kind)
         if kind == "photo":
-            _download_to(url, os.path.join(IMG_DIR, f"hd_{token}.jpg"))
+            p = os.path.join(IMG_DIR, f"hd_{token}.jpg")
+            _download_to(url, p)
+            try:
+                with open(p, "rb") as f:
+                    store_result(code, "photo", f.read(), "image/jpeg")
+            except Exception as e:
+                print("store photo warn:", e)
             TASKS[task_id] = {"status": "done", "token": token, "kind": "photo",
                               "error": None, "url": f"/api/hd/{token}.jpg"}
         else:
+            try:
+                rr = requests.get(url, timeout=120)
+                if rr.ok:
+                    store_result(code, "video", rr.content, "video/mp4")
+            except Exception as e:
+                print("store video warn:", e)
             TASKS[task_id] = {"status": "done", "token": token, "kind": "video",
                               "error": None, "url": url}
     except Exception as e:
@@ -726,7 +840,7 @@ def generate_hd(data: GenerateIn):
     token = uuid.uuid4().hex
     task_id = uuid.uuid4().hex
     TASKS[task_id] = {"status": "processing", "token": token, "kind": kind, "error": None}
-    threading.Thread(target=_run_hd, args=(task_id, token, mannequin, clothes, kind),
+    threading.Thread(target=_run_hd, args=(task_id, token, mannequin, clothes, kind, data.code),
                      daemon=True).start()
     fresh = get_code(data.code) or {}
     return {"task_id": task_id, "kind": kind, "creditsLeft": left,
@@ -774,6 +888,7 @@ def submit_feedback(data: FeedbackIn):
 # ------------------------------------------------------------- Тест-заказ -----
 class TestOrderIn(BaseModel):
     package: str
+    email: Optional[str] = ""
 
 
 @app.post("/api/test-order")
@@ -784,9 +899,11 @@ def test_order(data: TestOrderIn):
     if not pkg:
         raise HTTPException(400, "Неизвестный пакет")
     order_id = uuid.uuid4().hex
+    email = (data.email or "").strip()[:160]
     code = create_code(pkg["id"], pkg["count"], pkg["videos"])
-    dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,code,created_at) "
-          "VALUES(?,?,?,1,1,?,?)", (order_id, pkg["id"], pkg["price"], code, now_iso()))
+    dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,code,email,created_at) "
+          "VALUES(?,?,?,1,1,?,?,?)", (order_id, pkg["id"], pkg["price"], code, email, now_iso()))
+    send_code_email(email, code, pkg["title"])
     return {"ok": True, "order_id": order_id, "code": code}
 
 
