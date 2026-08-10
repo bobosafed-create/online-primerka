@@ -54,6 +54,8 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or "587")
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER).strip()
+# Отправка писем по HTTP-API (обходит блокировку SMTP-портов хостингом). Если задан — используется вместо SMTP.
+BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
 WAVESPEED_VIDEO_MODEL = os.getenv("WAVESPEED_VIDEO_MODEL", "wavespeed-ai/ai-virtual-outfit-tryon").strip()
@@ -637,6 +639,25 @@ def smtp_ready():
     return bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD and SMTP_FROM)
 
 
+def email_ready():
+    # почта работает либо через Brevo API (нужен ключ + адрес отправителя), либо через SMTP
+    if BREVO_API_KEY and SMTP_FROM:
+        return True
+    return smtp_ready()
+
+
+def _send_via_brevo(to, subject, body):
+    r = requests.post(
+        "https://api.brevo.com/v3/smtp/email",
+        headers={"accept": "application/json", "api-key": BREVO_API_KEY,
+                 "content-type": "application/json"},
+        json={"sender": {"name": "StyleGlobe", "email": SMTP_FROM},
+              "to": [{"email": to}], "subject": subject, "textContent": body},
+        timeout=25)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Brevo {r.status_code}: {r.text[:300]}")
+
+
 def _ipv4_socket(host, port, timeout):
     """Подключение только по IPv4 (обходит ошибку Errno 99 при отсутствии IPv6)."""
     infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
@@ -659,6 +680,9 @@ class _SMTP4SSL(smtplib.SMTP_SSL):
 
 
 def _send_email(to, subject, body):
+    if BREVO_API_KEY:
+        _send_via_brevo(to, subject, body)
+        return
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
     msg["To"] = to
@@ -677,7 +701,7 @@ def _send_email(to, subject, body):
 
 def send_code_email(to, code, pkg_title):
     to = (to or "").strip()
-    if not (to and code and smtp_ready()):
+    if not (to and code and email_ready()):
         return
     subject = "Ваш код доступа — StyleGlobe для селлеров"
     body = (
@@ -1035,20 +1059,36 @@ class TestEmailIn(BaseModel):
 @app.post("/api/admin/test-email")
 def admin_test_email(request: Request, data: TestEmailIn):
     require_admin(request)
-    missing = [k for k, v in (("SMTP_HOST", SMTP_HOST), ("SMTP_USER", SMTP_USER),
-                              ("SMTP_PASSWORD", SMTP_PASSWORD), ("SMTP_FROM", SMTP_FROM)) if not v]
-    if missing:
-        return {"ok": False, "error": "Не заданы переменные: " + ", ".join(missing)}
+    if not email_ready():
+        if BREVO_API_KEY and not SMTP_FROM:
+            return {"ok": False, "error": "Задайте SMTP_FROM — адрес отправителя, подтверждённый в Brevo"}
+        missing = [k for k, v in (("SMTP_HOST", SMTP_HOST), ("SMTP_USER", SMTP_USER),
+                                  ("SMTP_PASSWORD", SMTP_PASSWORD), ("SMTP_FROM", SMTP_FROM)) if not v]
+        return {"ok": False, "error": "Не заданы переменные: " + ", ".join(missing) +
+                " (или задайте BREVO_API_KEY для отправки по HTTP-API)"}
     to = (data.to or "").strip()
     if not to:
         return {"ok": False, "error": "Укажите email для теста"}
+    via = "Brevo API" if BREVO_API_KEY else f"SMTP {SMTP_HOST}:{SMTP_PORT}"
     try:
         _send_email(to, "Тест почты — StyleGlobe",
                     "Это тестовое письмо. Если вы его получили, отправка кода на email работает.")
-        return {"ok": True, "host": SMTP_HOST, "port": SMTP_PORT, "from": SMTP_FROM}
+        return {"ok": True, "via": via, "from": SMTP_FROM}
     except Exception as e:
-        return {"ok": False, "error": f"{type(e).__name__}: {e}",
-                "host": SMTP_HOST, "port": SMTP_PORT}
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "via": via}
+
+
+@app.get("/api/admin/serverip")
+def admin_serverip(request: Request):
+    require_admin(request)
+    for svc in ("https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"):
+        try:
+            ip = requests.get(svc, timeout=10).text.strip()
+            if ip:
+                return {"ip": ip}
+        except Exception:
+            continue
+    return {"ip": None, "error": "не удалось определить IP"}
 
 
 @app.post("/api/admin/settings")

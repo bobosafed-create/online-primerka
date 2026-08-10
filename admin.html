@@ -71,6 +71,9 @@
       <div class="field">
         <button class="btn" style="width:auto;padding:11px 20px;" onclick="testEmail()">Отправить тест</button>
       </div>
+      <div class="field">
+        <button class="btn" style="width:auto;padding:11px 20px;background:#444;" onclick="showIp()">IP сервера для Brevo</button>
+      </div>
       <div class="field" style="flex:1 1 260px;"><span id="testEmailMsg" class="muted"></span></div>
     </div>
 
@@ -212,6 +215,15 @@ async function delFaq(id){
   if(r.ok){ loadFaq(); }
 }
 
+async function showIp(){
+  const el=$('testEmailMsg'); el.className='muted'; el.textContent='Определяем IP…';
+  try{
+    const d=await api('/api/admin/serverip');
+    if(d.ip){ el.className='ok'; el.textContent='IP сервера: '+d.ip+' — впишите его в Brevo (Authorized IPs).'; }
+    else{ el.className='err'; el.textContent='Не удалось определить IP.'; }
+  }catch(e){ el.className='err'; el.textContent='Ошибка запроса'; }
+}
+
 async function testEmail(){
   const el=$('testEmailMsg'); el.className='muted'; el.textContent='Отправляем…';
   try{
@@ -219,8 +231,8 @@ async function testEmail(){
       headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
       body:JSON.stringify({to:$('testEmailTo').value})});
     const d=await r.json();
-    if(d.ok){ el.className='ok'; el.textContent='✅ Письмо отправлено ('+d.host+':'+d.port+'). Проверьте почту, в т.ч. «Спам».'; }
-    else{ el.className='err'; el.textContent='❌ '+(d.error||'ошибка'); }
+    if(d.ok){ el.className='ok'; el.textContent='✅ Письмо отправлено ('+(d.via||'')+'). Проверьте почту, в т.ч. «Спам».'; }
+    else{ el.className='err'; el.textContent='❌ '+(d.error||'ошибка')+(d.via?(' · путь: '+d.via):''); }
   }catch(e){ el.className='err'; el.textContent='Ошибка запроса'; }
 }
 
