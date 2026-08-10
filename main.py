@@ -54,7 +54,9 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or "587")
 SMTP_USER = os.getenv("SMTP_USER", "").strip()
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USER).strip()
-# Отправка писем по HTTP-API (обходит блокировку SMTP-портов хостингом). Если задан — используется вместо SMTP.
+# Отправка писем по HTTP-API (обходит блокировку SMTP-портов хостингом).
+# Приоритет: Unisender Go > Brevo > обычный SMTP.
+UNISENDER_API_KEY = os.getenv("UNISENDER_API_KEY", "").strip()
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "").strip()
 
 WAVESPEED_API_KEY = os.getenv("WAVESPEED_API_KEY", "").strip()
@@ -640,10 +642,34 @@ def smtp_ready():
 
 
 def email_ready():
-    # почта работает либо через Brevo API (нужен ключ + адрес отправителя), либо через SMTP
+    # почта работает через Unisender Go API, Brevo API (нужен ключ + адрес отправителя) или SMTP
+    if UNISENDER_API_KEY and SMTP_FROM:
+        return True
     if BREVO_API_KEY and SMTP_FROM:
         return True
     return smtp_ready()
+
+
+def _send_via_unisender(to, subject, body):
+    r = requests.post(
+        "https://goapi.unisender.ru/ru/transactional/api/v1/email/send.json",
+        headers={"X-API-KEY": UNISENDER_API_KEY, "content-type": "application/json"},
+        json={"message": {
+            "recipients": [{"email": to}],
+            "subject": subject,
+            "body": {"plaintext": body},
+            "from_email": SMTP_FROM,
+            "from_name": "StyleGlobe",
+        }},
+        timeout=25)
+    if r.status_code >= 300:
+        raise RuntimeError(f"Unisender {r.status_code}: {r.text[:300]}")
+    try:
+        j = r.json()
+    except Exception:
+        j = {}
+    if j.get("status") == "error":
+        raise RuntimeError(f"Unisender error: {j.get('message') or j}")
 
 
 def _send_via_brevo(to, subject, body):
@@ -680,6 +706,9 @@ class _SMTP4SSL(smtplib.SMTP_SSL):
 
 
 def _send_email(to, subject, body):
+    if UNISENDER_API_KEY:
+        _send_via_unisender(to, subject, body)
+        return
     if BREVO_API_KEY:
         _send_via_brevo(to, subject, body)
         return
@@ -1060,16 +1089,17 @@ class TestEmailIn(BaseModel):
 def admin_test_email(request: Request, data: TestEmailIn):
     require_admin(request)
     if not email_ready():
-        if BREVO_API_KEY and not SMTP_FROM:
-            return {"ok": False, "error": "Задайте SMTP_FROM — адрес отправителя, подтверждённый в Brevo"}
+        if (UNISENDER_API_KEY or BREVO_API_KEY) and not SMTP_FROM:
+            return {"ok": False, "error": "Задайте SMTP_FROM — адрес отправителя, подтверждённый в Unisender Go/Brevo"}
         missing = [k for k, v in (("SMTP_HOST", SMTP_HOST), ("SMTP_USER", SMTP_USER),
                                   ("SMTP_PASSWORD", SMTP_PASSWORD), ("SMTP_FROM", SMTP_FROM)) if not v]
         return {"ok": False, "error": "Не заданы переменные: " + ", ".join(missing) +
-                " (или задайте BREVO_API_KEY для отправки по HTTP-API)"}
+                " (или задайте UNISENDER_API_KEY / BREVO_API_KEY для отправки по HTTP-API)"}
     to = (data.to or "").strip()
     if not to:
         return {"ok": False, "error": "Укажите email для теста"}
-    via = "Brevo API" if BREVO_API_KEY else f"SMTP {SMTP_HOST}:{SMTP_PORT}"
+    via = ("Unisender API" if UNISENDER_API_KEY else
+           "Brevo API" if BREVO_API_KEY else f"SMTP {SMTP_HOST}:{SMTP_PORT}")
     try:
         _send_email(to, "Тест почты — StyleGlobe",
                     "Это тестовое письмо. Если вы его получили, отправка кода на email работает.")
