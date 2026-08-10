@@ -1006,6 +1006,29 @@ def admin_faq_delete(request: Request, data: FaqDelIn):
     return {"ok": True}
 
 
+class TestEmailIn(BaseModel):
+    to: str
+
+
+@app.post("/api/admin/test-email")
+def admin_test_email(request: Request, data: TestEmailIn):
+    require_admin(request)
+    missing = [k for k, v in (("SMTP_HOST", SMTP_HOST), ("SMTP_USER", SMTP_USER),
+                              ("SMTP_PASSWORD", SMTP_PASSWORD), ("SMTP_FROM", SMTP_FROM)) if not v]
+    if missing:
+        return {"ok": False, "error": "Не заданы переменные: " + ", ".join(missing)}
+    to = (data.to or "").strip()
+    if not to:
+        return {"ok": False, "error": "Укажите email для теста"}
+    try:
+        _send_email(to, "Тест почты — StyleGlobe",
+                    "Это тестовое письмо. Если вы его получили, отправка кода на email работает.")
+        return {"ok": True, "host": SMTP_HOST, "port": SMTP_PORT, "from": SMTP_FROM}
+    except Exception as e:
+        return {"ok": False, "error": f"{type(e).__name__}: {e}",
+                "host": SMTP_HOST, "port": SMTP_PORT}
+
+
 @app.post("/api/admin/settings")
 def admin_settings(request: Request, data: SettingsIn):
     require_admin(request)

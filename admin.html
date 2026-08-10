@@ -63,6 +63,17 @@
       <div class="field"><span id="saveMsg" class="ok"></span></div>
     </div>
 
+    <div class="row">
+      <div class="field">
+        <label>Проверка почты — куда отправить тест</label>
+        <input type="text" id="testEmailTo" style="width:220px;" placeholder="ваш@email">
+      </div>
+      <div class="field">
+        <button class="btn" style="width:auto;padding:11px 20px;" onclick="testEmail()">Отправить тест</button>
+      </div>
+      <div class="field" style="flex:1 1 260px;"><span id="testEmailMsg" class="muted"></span></div>
+    </div>
+
     <h1 style="font-size:16px;">Заказы</h1>
     <table id="ordersTable">
       <thead><tr><th>Дата</th><th>Пакет</th><th>Сумма</th><th>Оплачен</th><th>Код доступа</th><th>Тест</th></tr></thead>
@@ -199,6 +210,18 @@ async function delFaq(id){
     headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
     body:JSON.stringify({id:id})});
   if(r.ok){ loadFaq(); }
+}
+
+async function testEmail(){
+  const el=$('testEmailMsg'); el.className='muted'; el.textContent='Отправляем…';
+  try{
+    const r=await fetch('/api/admin/test-email',{method:'POST',
+      headers:{'Content-Type':'application/json','X-Admin-Token':TOKEN},
+      body:JSON.stringify({to:$('testEmailTo').value})});
+    const d=await r.json();
+    if(d.ok){ el.className='ok'; el.textContent='✅ Письмо отправлено ('+d.host+':'+d.port+'). Проверьте почту, в т.ч. «Спам».'; }
+    else{ el.className='err'; el.textContent='❌ '+(d.error||'ошибка'); }
+  }catch(e){ el.className='err'; el.textContent='Ошибка запроса'; }
 }
 
 async function saveSettings(){
