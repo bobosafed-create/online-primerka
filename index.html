@@ -200,6 +200,17 @@
     <h2><span class="step-num">3</span> Бесплатное превью</h2>
     <div class="sub">Создайте бесплатное фото на модели (с водяным знаком) — оцените качество.</div>
     <button class="btn green" id="freeBtn" disabled onclick="startFreePreview()">✨ Создать бесплатное превью</button>
+    <div id="innGate" style="display:none;margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fbfaf7;">
+      <div class="sub" style="margin:0 0 8px;">Этот сервис предназначен только для селлеров маркетплейсов. Для подтверждения введите ИНН (ООО, ИП или самозанятого).</div>
+      <input id="innInput" inputmode="numeric" maxlength="12" placeholder="ИНН — 10 или 12 цифр"
+             style="width:100%;max-width:280px;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:16px;">
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:10px 0;color:#6b6558;">
+        <input type="checkbox" id="innConsent" style="margin-top:2px;">
+        <span>Я селлер и даю согласие на обработку ИНН для проверки статуса (см. <a href="/politika" target="_blank">политику</a>).</span>
+      </label>
+      <div class="err" id="innErr"></div>
+      <button class="btn green" onclick="confirmInn()">Подтвердить и создать превью</button>
+    </div>
     <div class="err" id="freeErr"></div>
     <div class="progress" id="freeProgress" style="display:none;"><div class="spinner"></div><div id="freeProgressText">Готовим превью…</div></div>
     <div class="result" id="previewResult" style="display:none;">
@@ -406,26 +417,57 @@ function pollTask(taskId,maxTicks,onDone,onError){
 }
 
 /* ---------- Шаг 3: бесплатное превью ---------- */
-async function startFreePreview(){
+function startFreePreview(){
   $('freeErr').textContent='';
   if(!selectedMannequin){ $('freeErr').textContent='Выберите модель.'; return; }
   if(!items.length){ $('freeErr').textContent='Добавьте фото товара.'; return; }
+  if(CONFIG.innGate){            // сервис только для селлеров — сначала подтверждение ИНН
+    $('freeBtn').style.display='none';
+    $('innErr').textContent='';
+    $('innGate').style.display='block';
+    $('innInput').focus();
+    return;
+  }
+  doFreePreview('', false);
+}
+
+function confirmInn(){
+  $('innErr').textContent='';
+  const inn=($('innInput').value||'').replace(/\D/g,'');
+  if(inn.length!==10 && inn.length!==12){ $('innErr').textContent='Введите ИНН: 10 цифр для организации или 12 для ИП/самозанятого.'; return; }
+  if(!$('innConsent').checked){ $('innErr').textContent='Отметьте согласие на обработку данных.'; return; }
+  $('innGate').style.display='none';
+  doFreePreview(inn, true);
+}
+
+function resetFreeBtn(){ $('freeBtn').style.display=''; $('freeBtn').disabled=false; }
+
+async function doFreePreview(inn, consent){
   $('freeBtn').disabled=true; $('freeProgress').style.display='block'; $('previewResult').style.display='none';
-  $('freeProgressText').textContent='Готовим превью… обычно до минуты.';
+  $('freeProgressText').textContent='Идёт генерация образа…';
   try{
     const r=await fetch('/api/free-preview',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({mannequin:selectedMannequin,garments:garments(),visitorId:visitorId()})});
-    if(r.status===429){ $('freeProgress').style.display='none'; $('freeErr').textContent='Бесплатное превью уже использовано. Купите пакет ниже.'; return; }
+      body:JSON.stringify({mannequin:selectedMannequin,garments:garments(),visitorId:visitorId(),inn:inn,consent:consent})});
+    if(r.status===429){ $('freeProgress').style.display='none'; $('freeErr').textContent='Бесплатное превью уже использовано. Купите пакет ниже.'; resetFreeBtn(); return; }
+    if(r.status===403){ const e=await r.json().catch(()=>({}));
+      $('freeProgress').style.display='none';
+      $('freeErr').textContent=e.detail||'ИНН не найден. Бесплатная генерация доступна только селлерам. Приобретите платный пакет.';
+      goal('inn_rejected'); resetFreeBtn();
+      $('card4').scrollIntoView({behavior:'smooth',block:'start'}); return; }
+    if(r.status===422||r.status===400){ const e=await r.json().catch(()=>({}));
+      $('freeProgress').style.display='none';
+      $('innErr').textContent=e.detail||'Проверьте ИНН и согласие.';
+      $('innGate').style.display='block'; $('freeBtn').style.display='none'; return; }
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
     const d=await r.json(); const tok=d.token;
     pollTask(d.task_id,40,(res)=>{ $('freeProgress').style.display='none';
       $('previewImg').src=(res.previewUrl||('/api/preview/'+tok))+'?t='+Date.now();
-      $('previewResult').style.display='block'; $('freeBtn').disabled=false;
+      $('previewResult').style.display='block';
       goal('preview_created');
       $('survey').style.display='block';
       $('card4').scrollIntoView({behavior:'smooth',block:'start'});
-    },(err)=>{ $('freeProgress').style.display='none'; $('freeErr').textContent='Не удалось: '+err; $('freeBtn').disabled=false; });
-  }catch(e){ $('freeProgress').style.display='none'; $('freeErr').textContent=String(e.message||'ошибка'); $('freeBtn').disabled=false; }
+    },(err)=>{ $('freeProgress').style.display='none'; $('freeErr').textContent='Не удалось: '+err; resetFreeBtn(); });
+  }catch(e){ $('freeProgress').style.display='none'; $('freeErr').textContent=String(e.message||'ошибка'); resetFreeBtn(); }
 }
 
 /* ---------- Шаг 4: пакеты ---------- */

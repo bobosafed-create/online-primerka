@@ -67,6 +67,10 @@ TRYON_DURATION = int(os.getenv("TRYON_DURATION", "5"))
 TRYON_SEND_DURATION = os.getenv("TRYON_SEND_DURATION", "0") == "1"
 TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
 
+# --- Проверка ИНН (фильтр «только для селлеров») ---
+DADATA_API_KEY = os.getenv("DADATA_API_KEY", "").strip()
+INN_GATE = os.getenv("INN_GATE", "1") == "1"   # 1 = включить проверку ИНН, 0 = выключить
+
 # Пакеты (цены и число генераций). Менять можно здесь.
 PACKAGES = [
     {"id": "test",    "title": "1 фото (Тест)",               "count": 1,  "videos": 0,  "price": "99.00",   "video": False},
@@ -423,6 +427,7 @@ def config():
         "tryonEnabled": tryon_enabled(),
         "mannequins": available_mannequins(),
         "maxItems": 8,
+        "innGate": inn_gate_on(),
     }
 
 
@@ -562,10 +567,96 @@ def mark_free_used(vid):
         print("mark_free_used warn:", e)
 
 
+def inn_gate_on():
+    return INN_GATE and bool(DADATA_API_KEY)
+
+
+def inn_checksum_ok(inn):
+    inn = (inn or "").strip()
+    if not inn.isdigit():
+        return False
+    if len(inn) == 10:
+        w = [2, 4, 10, 3, 5, 9, 4, 6, 8]
+        c = sum(int(inn[i]) * w[i] for i in range(9)) % 11 % 10
+        return c == int(inn[9])
+    if len(inn) == 12:
+        w1 = [7, 2, 4, 10, 3, 5, 9, 4, 6, 8]
+        w2 = [3, 7, 2, 4, 10, 3, 5, 9, 4, 6, 8]
+        c1 = sum(int(inn[i]) * w1[i] for i in range(10)) % 11 % 10
+        c2 = sum(int(inn[i]) * w2[i] for i in range(11)) % 11 % 10
+        return c1 == int(inn[10]) and c2 == int(inn[11])
+    return False
+
+
+INN_CACHE = {}
+
+
+def _dadata_party(inn):
+    """Ищет организацию/ИП по ИНН через DaData. Возвращает найденную запись или None."""
+    if not DADATA_API_KEY:
+        return None
+    try:
+        r = requests.post(
+            "https://suggestions.dadata.ru/suggestions/api/4_1/rs/findById/party",
+            headers={"Content-Type": "application/json", "Accept": "application/json",
+                     "Authorization": f"Token {DADATA_API_KEY}"},
+            json={"query": inn}, timeout=15)
+        if r.status_code >= 300:
+            print("dadata http", r.status_code, r.text[:200])
+            return None
+        sugg = (r.json() or {}).get("suggestions") or []
+        return sugg[0] if sugg else None
+    except Exception as e:
+        print("dadata warn:", e)
+        return None
+
+
+def _fns_self_employed(inn):
+    """ФНС: является ли ИНН плательщиком НПД (самозанятым). True / False / None."""
+    try:
+        import datetime as _dt
+        r = requests.post(
+            "https://statusnpd.nalog.ru/api/v1/tracker/taxpayer_status",
+            headers={"Content-Type": "application/json"},
+            json={"inn": inn, "requestDate": _dt.date.today().isoformat()}, timeout=15)
+        if r.status_code >= 300:
+            return None
+        return bool((r.json() or {}).get("status"))
+    except Exception as e:
+        print("fns npd warn:", e)
+        return None
+
+
+def verify_seller(inn):
+    """Возвращает (is_seller, kind). kind: ООО / ИП / самозанятый / none / invalid."""
+    inn = (inn or "").strip()
+    if not inn_checksum_ok(inn):
+        return (False, "invalid")
+    if inn in INN_CACHE:
+        return INN_CACHE[inn]
+    is_seller, kind = False, "none"
+    party = _dadata_party(inn)
+    if party:
+        d = party.get("data") or {}
+        typ = d.get("type")
+        if typ == "LEGAL":
+            is_seller, kind = True, "ООО"
+        elif typ == "INDIVIDUAL":
+            is_seller, kind = True, "ИП"
+    if not is_seller and len(inn) == 12:
+        if _fns_self_employed(inn):
+            is_seller, kind = True, "самозанятый"
+    res = (is_seller, kind)
+    INN_CACHE[inn] = res
+    return res
+
+
 class FreePreviewIn(BaseModel):
     mannequin: int = 1
     garments: List[str] = []
     visitorId: str = ""
+    inn: str = ""
+    consent: bool = False
 
 
 def _run_free_preview(task_id, token, mannequin, clothes, vid):
@@ -591,6 +682,16 @@ def free_preview(data: FreePreviewIn):
     vid = (data.visitorId or "").strip()[:64]
     if vid and has_used_free(vid) and not test_mode():
         raise HTTPException(429, "Бесплатное превью уже использовано. Купите пакет, чтобы создавать фото в HD.")
+    if inn_gate_on():
+        if not data.consent:
+            raise HTTPException(400, "Отметьте согласие на обработку данных.")
+        inn = (data.inn or "").strip()
+        if not inn_checksum_ok(inn):
+            raise HTTPException(422, "ИНН введён неверно. Проверьте цифры: 10 для организации или 12 для ИП/самозанятого.")
+        is_seller, _kind = verify_seller(inn)
+        if not is_seller:
+            raise HTTPException(403, "Этот ИНН не найден в реестрах бизнеса. Бесплатная генерация доступна только "
+                                     "селлерам — ООО, ИП или самозанятым. Приобретите платный пакет.")
     clothes = _save_garment_urls(data.garments)
     if not clothes:
         raise HTTPException(400, "Нет фото товара")
