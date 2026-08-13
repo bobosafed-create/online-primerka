@@ -71,6 +71,9 @@ TRYON_PROMPT = os.getenv("TRYON_PROMPT", "").strip()
 DADATA_API_KEY = os.getenv("DADATA_API_KEY", "").strip()
 INN_GATE = os.getenv("INN_GATE", "1") == "1"   # 1 = включить проверку ИНН, 0 = выключить
 
+# --- Тестовая страница /proto (две ленты + перетаскивание, реальная генерация) ---
+PROTO_KEY = os.getenv("PROTO_KEY", "").strip()   # задайте секрет, чтобы открыть /proto?k=СЕКРЕТ
+
 # Пакеты (цены и число генераций). Менять можно здесь.
 PACKAGES = [
     {"id": "test",    "title": "1 фото (Тест)",               "count": 1,  "videos": 0,  "price": "99.00",   "video": False},
@@ -353,6 +356,13 @@ def p_kontakty():
 @app.get("/admin")
 def p_admin():
     return _page("admin.html")
+
+
+@app.get("/proto")
+def p_proto(k: str = ""):
+    if not PROTO_KEY or k != PROTO_KEY:
+        raise HTTPException(404, "не найдено")
+    return _page("proto.html")
 
 
 @app.get("/robots.txt")
@@ -720,6 +730,42 @@ def task_status(task_id: str):
     if not t:
         raise HTTPException(404, "Задача не найдена")
     return t
+
+
+class ProtoGenIn(BaseModel):
+    k: str = ""
+    garment: str = ""
+    mannequin: int = 1
+
+
+def _run_proto(task_id, mann, clothes):
+    TASKS[task_id] = {"status": "processing"}
+    try:
+        portrait = f"{SITE_URL}/model/{mann}"
+        url = _generate(portrait, clothes, "photo")
+        TASKS[task_id] = {"status": "done", "url": url}
+    except Exception as e:
+        TASKS[task_id] = {"status": "error", "error": str(e)}
+
+
+@app.post("/api/proto-generate")
+def proto_generate(data: ProtoGenIn):
+    if not PROTO_KEY or (data.k or "") != PROTO_KEY:
+        raise HTTPException(404, "не найдено")
+    if not tryon_enabled():
+        raise HTTPException(503, "Нет ключа WaveSpeed или манекенов")
+    g = (data.garment or "").strip()
+    if g.startswith("data:"):
+        clothes = [_save_dataurl(g)]
+    elif "/assets/" in g or g.startswith("assets/"):
+        clothes = [f"{SITE_URL}/assets/{os.path.basename(g)}"]
+    else:
+        raise HTTPException(400, "Не выбрана вещь")
+    mann = data.mannequin if mannequin_frame(data.mannequin) else 1
+    task_id = uuid.uuid4().hex
+    TASKS[task_id] = {"status": "processing"}
+    threading.Thread(target=_run_proto, args=(task_id, mann, clothes), daemon=True).start()
+    return {"task_id": task_id}
 
 
 # ---------------------------------------------------------- Покупка пакета ----

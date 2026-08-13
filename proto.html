@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Тест: перетащите вещь на манекен — StyleGlobe</title>
+<style>
+  :root{--accent:#c72a49;--green:#1f7a44;--ink:#2b2a28;--muted:#6b6558;--line:#e7ded3;--bg:#faf6ef;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  body{font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;color:var(--ink);background:var(--bg);margin:0;line-height:1.5;}
+  .wrap{max-width:1000px;margin:0 auto;padding:18px 14px 40px;}
+  h1{font-size:20px;margin:0 0 4px;}
+  .sub{color:var(--muted);font-size:13.5px;margin:0 0 6px;}
+  .mock{background:#fff4e5;border:1px solid #f0c98a;border-radius:10px;padding:9px 13px;font-size:13px;color:#a8560a;margin:10px 0 4px;}
+  .lane{margin:18px 0;}
+  .lane h2{font-size:15px;margin:0 0 8px;display:flex;align-items:center;gap:8px;}
+  .lane h2 .tag{font-size:11px;color:var(--muted);font-weight:400;}
+  .row{position:relative;}
+  .track{display:flex;gap:12px;overflow-x:auto;scroll-behavior:smooth;padding:6px 2px;touch-action:pan-x;scrollbar-width:none;}
+  .track::-webkit-scrollbar{display:none;}
+  .arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:5;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:18px;cursor:pointer;box-shadow:0 2px 8px rgba(0,0,0,.12);display:flex;align-items:center;justify-content:center;}
+  .arrow.l{left:-6px;} .arrow.r{right:-6px;}
+  .card{flex:0 0 auto;border-radius:12px;overflow:hidden;background:#fff;border:2px solid var(--line);position:relative;}
+  .garment{width:120px;touch-action:none;cursor:grab;}
+  .garment img{width:100%;height:150px;object-fit:cover;display:block;pointer-events:none;}
+  .garment .cap{font-size:11px;text-align:center;padding:5px 2px;color:var(--muted);}
+  .garment.sel{border-color:var(--accent);box-shadow:0 0 0 3px rgba(199,42,73,.15);}
+  .upload{width:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;height:181px;cursor:pointer;color:var(--accent);font-size:13px;border-style:dashed;text-align:center;padding:6px;}
+  .upload .plus{font-size:30px;line-height:1;}
+  .mann{width:150px;touch-action:none;cursor:pointer;}
+  .mann img{width:100%;height:225px;object-fit:cover;display:block;pointer-events:none;}
+  .mann .cap{font-size:11px;text-align:center;padding:5px 2px;color:var(--muted);}
+  .mann.over{border-color:var(--green);box-shadow:0 0 0 3px rgba(31,122,68,.25);}
+  .mann.done{border-color:var(--green);}
+  .badge{position:absolute;top:6px;left:6px;width:44px;height:44px;border-radius:8px;object-fit:cover;border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.3);}
+  .ok{position:absolute;top:6px;right:6px;background:var(--green);color:#fff;font-size:12px;border-radius:20px;padding:2px 8px;}
+  .ovl{position:absolute;inset:0;background:rgba(255,255,255,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--ink);text-align:center;padding:6px;}
+  .spin{width:26px;height:26px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp 1s linear infinite;}
+  @keyframes sp{to{transform:rotate(360deg);}}
+  .ghost{position:fixed;width:96px;height:96px;object-fit:cover;border-radius:10px;border:2px solid #fff;box-shadow:0 6px 20px rgba(0,0,0,.35);pointer-events:none;z-index:9999;transform:translate(-50%,-50%);opacity:.92;}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:24px;font-size:13.5px;opacity:0;transition:opacity .25s;z-index:9998;max-width:92%;text-align:center;}
+  .toast.show{opacity:1;}
+  .hint{font-size:12.5px;color:var(--muted);margin-top:4px;}
+  .reset{margin-top:16px;background:#fff;border:1px solid var(--line);border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;color:var(--ink);}
+  .noaccess{max-width:520px;margin:60px auto;background:#fff;border:1px solid var(--line);border-radius:12px;padding:24px;text-align:center;color:var(--muted);}
+</style>
+</head>
+<body>
+<div class="wrap" id="app" style="display:none;">
+  <h1>Тест: соберите образ перетаскиванием</h1>
+  <p class="sub">Перетащите вещь на манекен — <b>мышкой</b> или <b>пальцем</b>. Или: коснитесь вещи, затем манекена.</p>
+  <div class="mock">Генерация настоящая — образ рисует нейросеть, поэтому каждая проба расходует средства сервиса. Страница только для внутренней проверки. Одна генерация занимает до минуты.</div>
+
+  <div class="lane">
+    <h2>🧥 Лента вещей <span class="tag">— перетащите нужную на манекен · «＋» добавит вашу фотографию вещи</span></h2>
+    <div class="row">
+      <button class="arrow l" onclick="scrollLane('garTrack',-1)">‹</button>
+      <div class="track" id="garTrack"></div>
+      <button class="arrow r" onclick="scrollLane('garTrack',1)">›</button>
+    </div>
+  </div>
+
+  <div class="lane">
+    <h2>🧍 Лента манекенов <span class="tag">— отпустите вещь на выбранном</span></h2>
+    <div class="row">
+      <button class="arrow l" onclick="scrollLane('mannTrack',-1)">‹</button>
+      <div class="track" id="mannTrack"></div>
+      <button class="arrow r" onclick="scrollLane('mannTrack',1)">›</button>
+    </div>
+    <div class="hint">Выбрана вещь? Коснитесь манекена, чтобы примерить. Результат появится прямо на манекене.</div>
+  </div>
+
+  <button class="reset" onclick="resetAll()">↺ Сбросить</button>
+</div>
+
+<div class="noaccess" id="noaccess" style="display:none;">Нет доступа. Откройте страницу со своим ключом: <code>/proto?k=ВАШ_КЛЮЧ</code></div>
+
+<div class="toast" id="toast"></div>
+
+<input type="file" id="upl" accept="image/*" style="display:none;">
+
+<script>
+const KEY = new URLSearchParams(location.search).get('k') || '';
+const GARMENTS = [
+  {src:'/assets/before1.jpg', name:'Пример: блузка'},
+  {src:'/assets/before2.jpg', name:'Пример: брюки'},
+  {src:'/assets/look1_b1.jpg', name:'Пример 3'},
+  {src:'/assets/look2_b1.jpg', name:'Пример 4'}
+];
+const MANN_COUNT = 6;
+
+function el(t,c){const e=document.createElement(t); if(c)e.className=c; return e;}
+function $(id){return document.getElementById(id);}
+
+if(!KEY){ $('noaccess').style.display='block'; }
+else { $('app').style.display='block'; buildLanes(); }
+
+function buildLanes(){
+  const gt=$('garTrack');
+  // карточка загрузки своей вещи
+  const up=el('div','card upload');
+  up.innerHTML='<div class="plus">＋</div><div>Своя вещь<br>(фото)</div>';
+  up.onclick=()=>$('upl').click();
+  gt.appendChild(up);
+  GARMENTS.forEach((g,i)=>gt.appendChild(makeGarment(g.src,g.name)));
+
+  const mt=$('mannTrack');
+  for(let i=1;i<=MANN_COUNT;i++){
+    const c=el('div','card mann'); c.dataset.mann=i;
+    const im=el('img'); im.src='/model/'+i; c.appendChild(im);
+    const cap=el('div','cap'); cap.textContent='Модель '+i; c.appendChild(cap);
+    c.addEventListener('click',()=>onMannTap(c));
+    mt.appendChild(c);
+  }
+}
+
+function makeGarment(src,name){
+  const c=el('div','card garment'); c.dataset.src=src;
+  const im=el('img'); im.src=src; c.appendChild(im);
+  const cap=el('div','cap'); cap.textContent=name; c.appendChild(cap);
+  c.addEventListener('pointerdown',e=>onDown(e,c));
+  return c;
+}
+
+$('upl').addEventListener('change',e=>{
+  const f=e.target.files&&e.target.files[0]; if(!f) return;
+  const rd=new FileReader();
+  rd.onload=()=>{ const card=makeGarment(rd.result,'Ваша вещь'); $('garTrack').insertBefore(card, $('garTrack').children[1]); toast('Вещь добавлена — перетащите её на манекен'); };
+  rd.readAsDataURL(f); e.target.value='';
+});
+
+function scrollLane(id,dir){$(id).scrollBy({left:dir*260,behavior:'smooth'});}
+
+let selected=null, drag=null, justDragged=false;
+
+function onDown(e,card){
+  drag={card, src:card.dataset.src, x0:e.clientX, y0:e.clientY, active:false, ghost:null};
+  window.addEventListener('pointermove',onMove);
+  window.addEventListener('pointerup',onUp);
+}
+function onMove(e){
+  if(!drag) return;
+  const dx=e.clientX-drag.x0, dy=e.clientY-drag.y0;
+  if(!drag.active && Math.hypot(dx,dy)>8){
+    drag.active=true;
+    const g=el('img','ghost'); g.src=drag.src; document.body.appendChild(g); drag.ghost=g;
+    document.body.style.userSelect='none';
+  }
+  if(drag.active){
+    e.preventDefault();
+    drag.ghost.style.left=e.clientX+'px'; drag.ghost.style.top=e.clientY+'px';
+    const m=mannUnder(e.clientX,e.clientY);
+    document.querySelectorAll('.mann').forEach(x=>x.classList.toggle('over', x===m));
+  }
+}
+function onUp(e){
+  window.removeEventListener('pointermove',onMove);
+  window.removeEventListener('pointerup',onUp);
+  if(!drag) return;
+  if(drag.active){
+    const m=mannUnder(e.clientX,e.clientY);
+    if(drag.ghost) drag.ghost.remove();
+    document.body.style.userSelect='';
+    document.querySelectorAll('.mann').forEach(x=>x.classList.remove('over'));
+    if(m){ applyGarment(drag.src, m); justDragged=true; setTimeout(()=>justDragged=false,400); }
+  } else {
+    selectGarment(drag.card);
+  }
+  drag=null;
+}
+function mannUnder(x,y){const e=document.elementFromPoint(x,y); return e? e.closest('.mann'):null;}
+
+function selectGarment(card){
+  if(selected===card){ card.classList.remove('sel'); selected=null; return; }
+  document.querySelectorAll('.garment').forEach(x=>x.classList.remove('sel'));
+  card.classList.add('sel'); selected=card;
+  toast('Вещь выбрана — коснитесь манекена');
+}
+function onMannTap(card){
+  if(justDragged) return;
+  if(selected){ applyGarment(selected.dataset.src, card); selected.classList.remove('sel'); selected=null; }
+  else { toast('Сначала выберите вещь в верхней ленте'); }
+}
+
+async function applyGarment(src, mann){
+  if(mann.querySelector('.ovl')) return;
+  const ov=el('div','ovl'); ov.innerHTML='<div class="spin"></div><div>Идёт генерация образа…<br>до минуты</div>'; mann.appendChild(ov);
+  try{
+    const r=await fetch('/api/proto-generate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({k:KEY, garment:src, mannequin:parseInt(mann.dataset.mann)})});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||('ошибка '+r.status)); }
+    const d=await r.json();
+    pollProto(d.task_id, mann, src);
+  }catch(e){ const ov2=mann.querySelector('.ovl'); if(ov2)ov2.remove(); toast('Ошибка: '+(e.message||e)); }
+}
+
+function pollProto(id, mann, garSrc){
+  let n=0;
+  const iv=setInterval(async ()=>{
+    n++;
+    try{
+      const r=await fetch('/api/task/'+id); const t=await r.json();
+      if(t.status==='done'){ clearInterval(iv);
+        const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
+        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url; }
+        mann.classList.add('done');
+        const old=mann.querySelector('.badge'); if(old)old.remove();
+        const b=el('img','badge'); b.src=garSrc; mann.appendChild(b);
+        let ok=mann.querySelector('.ok'); if(!ok){ ok=el('div','ok'); ok.textContent='✓ готово'; mann.appendChild(ok); }
+        toast('Готово — это реальная генерация нейросети');
+      } else if(t.status==='error'){ clearInterval(iv);
+        const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
+        toast('Ошибка генерации: '+String(t.error||'').slice(0,140));
+      } else if(n>60){ clearInterval(iv); const ov=mann.querySelector('.ovl'); if(ov)ov.remove(); toast('Слишком долго — попробуйте ещё раз'); }
+    }catch(e){ if(n>60){ clearInterval(iv);} }
+  }, 2000);
+}
+
+function resetAll(){
+  selected=null;
+  document.querySelectorAll('.garment').forEach(x=>x.classList.remove('sel'));
+  document.querySelectorAll('.mann').forEach((m,i)=>{
+    m.classList.remove('done','over');
+    const b=m.querySelector('.badge'); if(b)b.remove();
+    const ok=m.querySelector('.ok'); if(ok)ok.remove();
+    const ov=m.querySelector('.ovl'); if(ov)ov.remove();
+    const img=m.querySelector('img'); if(img) img.src='/model/'+(i+1);
+  });
+  toast('Сброшено');
+}
+
+let toastT=null;
+function toast(msg){
+  const t=$('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+</script>
+</body>
+</html>
