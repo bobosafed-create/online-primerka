@@ -82,12 +82,7 @@
 
 <script>
 const KEY = new URLSearchParams(location.search).get('k') || '';
-const GARMENTS = [
-  {src:'/assets/before1.jpg', name:'Пример: блузка'},
-  {src:'/assets/before2.jpg', name:'Пример: брюки'},
-  {src:'/assets/look1_b1.jpg', name:'Пример 3'},
-  {src:'/assets/look2_b1.jpg', name:'Пример 4'}
-];
+const GARMENTS = [];   // примеры убраны: нейросеть ждёт фото самой вещи, грузите через «＋ Своя вещь»
 const MANN_COUNT = 6;
 
 function el(t,c){const e=document.createElement(t); if(c)e.className=c; return e;}
@@ -123,10 +118,21 @@ function makeGarment(src,name){
   return c;
 }
 
+function downscale(img,max){
+  let w=img.width,h=img.height;
+  if(Math.max(w,h)>max){const k=max/Math.max(w,h);w=Math.round(w*k);h=Math.round(h*k);}
+  const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+  return c.toDataURL('image/jpeg',0.9);
+}
 $('upl').addEventListener('change',e=>{
   const f=e.target.files&&e.target.files[0]; if(!f) return;
   const rd=new FileReader();
-  rd.onload=()=>{ const card=makeGarment(rd.result,'Ваша вещь'); $('garTrack').insertBefore(card, $('garTrack').children[1]); toast('Вещь добавлена — перетащите её на манекен'); };
+  rd.onload=()=>{ const im=new Image(); im.onload=()=>{
+      const small=downscale(im,1024);
+      const gt=$('garTrack'); const card=makeGarment(small,'Ваша вещь');
+      gt.insertBefore(card, gt.children[1]||null);
+      toast('Вещь добавлена — перетащите её на манекен');
+    }; im.src=rd.result; };
   rd.readAsDataURL(f); e.target.value='';
 });
 
