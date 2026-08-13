@@ -70,8 +70,9 @@
     <div class="hint">Выбрана вещь? Коснитесь манекена, чтобы примерить. Результат появится прямо на манекене.</div>
   </div>
 
+  <div id="resultBox" style="margin-top:16px;"></div>
   <button class="reset" onclick="resetAll()">↺ Сбросить</button>
-  <div class="hint" id="statusLine" style="margin-top:12px;min-height:20px;"></div>
+  <div class="hint" id="statusLine" style="margin-top:12px;min-height:20px;word-break:break-all;"></div>
 </div>
 
 <div class="noaccess" id="noaccess" style="display:none;">Нет доступа. Откройте страницу со своим ключом: <code>/proto?k=ВАШ_КЛЮЧ</code></div>
@@ -213,10 +214,12 @@ function pollProto(id, mann, garSrc){
       const r=await fetch('/api/task/'+id); const t=await r.json();
       if(t.status==='done'){ clearInterval(iv);
         const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
-        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url; }
+        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url+'?t='+Date.now(); }
         mann.classList.add('done');
         let ok=mann.querySelector('.ok'); if(!ok){ ok=el('div','ok'); ok.textContent='✓ готово'; mann.appendChild(ok); }
-        setStatus('Готово — образ сгенерирован нейросетью.');
+        const rb=$('resultBox');
+        if(rb){ rb.innerHTML='<b>Готовый образ:</b><br><img src="'+t.url+'" style="max-width:320px;border:1px solid #ccc;border-radius:8px;">'; }
+        setStatus('Готово. Ссылка результата: '+t.url);
         toast('Готово — это реальная генерация нейросети');
       } else if(t.status==='error'){ clearInterval(iv);
         const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
