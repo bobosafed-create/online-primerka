@@ -770,6 +770,35 @@ def proto_generate(data: ProtoGenIn):
     return {"task_id": task_id}
 
 
+@app.get("/api/proto-debug")
+def proto_debug(k: str = "", mannequin: int = 1):
+    if not PROTO_KEY or k != PROTO_KEY:
+        raise HTTPException(404, "не найдено")
+    mann = mannequin if mannequin_frame(mannequin) else 1
+    portrait = f"{SITE_URL}/model/{mann}"
+    clothes = [f"{SITE_URL}/assets/before1.jpg"]
+    pred_id, poll = _wavespeed_create(portrait, clothes, WAVESPEED_PHOTO_MODEL, False)
+    data = {}
+    for _ in range(40):
+        time.sleep(3)
+        rr = requests.get(poll, headers={"Authorization": f"Bearer {WAVESPEED_API_KEY}"}, timeout=60)
+        j = rr.json()
+        data = j.get("data", j)
+        st = (data.get("status") or "").lower()
+        if st in ("completed", "succeeded", "success", "failed", "error", "canceled"):
+            break
+    outs = data.get("outputs") or ([data.get("output")] if data.get("output") else [])
+    html = ["<meta charset='utf-8'><body style='font-family:sans-serif;padding:16px'>"]
+    html.append(f"<h3>Статус: {data.get('status')} · картинок в ответе: {len(outs)}</h3>")
+    html.append("<p>Ниже — что WaveSpeed вернул. Готовый образ (модель в одежде) — это и есть нужная картинка; запомните её номер.</p>")
+    for i, u in enumerate(outs):
+        html.append(f"<div style='margin:10px 0'><b>output[{i}]</b><br>"
+                    f"<img src='{u}' style='max-width:300px;border:1px solid #ccc'></div>")
+    html.append("<pre style='font-size:11px;white-space:pre-wrap;background:#f4f4f4;padding:8px'>"
+                + json.dumps(data, ensure_ascii=False)[:2500] + "</pre></body>")
+    return Response(content="".join(html), media_type="text/html")
+
+
 # ---------------------------------------------------------- Покупка пакета ----
 # -------------------------------------------------- Хранилище образов / почта --
 def _blob(b):
