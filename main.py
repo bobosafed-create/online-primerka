@@ -743,7 +743,9 @@ def _run_proto(task_id, mann, clothes):
     try:
         portrait = f"{SITE_URL}/model/{mann}"
         url = _generate(portrait, clothes, "photo")
-        TASKS[task_id] = {"status": "done", "url": url}
+        token = uuid.uuid4().hex
+        _download_to(url, os.path.join(IMG_DIR, token + ".jpg"))
+        TASKS[task_id] = {"status": "done", "url": f"/api/img/{token}"}
     except Exception as e:
         TASKS[task_id] = {"status": "error", "error": str(e)}
 

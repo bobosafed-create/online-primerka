@@ -71,6 +71,7 @@
   </div>
 
   <button class="reset" onclick="resetAll()">↺ Сбросить</button>
+  <div class="hint" id="statusLine" style="margin-top:12px;min-height:20px;"></div>
 </div>
 
 <div class="noaccess" id="noaccess" style="display:none;">Нет доступа. Откройте страницу со своим ключом: <code>/proto?k=ВАШ_КЛЮЧ</code></div>
@@ -182,16 +183,20 @@ function onMannTap(card){
   else { toast('Сначала выберите вещь в верхней ленте'); }
 }
 
+function setStatus(msg, err){ const s=$('statusLine'); s.textContent=msg||''; s.style.color=err?'#c72a49':'var(--muted)'; }
+
 async function applyGarment(src, mann){
   if(mann.querySelector('.ovl')) return;
   const ov=el('div','ovl'); ov.innerHTML='<div class="spin"></div><div>Идёт генерация образа…<br>до минуты</div>'; mann.appendChild(ov);
+  setStatus('Отправляю запрос к нейросети…');
   try{
     const r=await fetch('/api/proto-generate',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({k:KEY, garment:src, mannequin:parseInt(mann.dataset.mann)})});
     if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||('ошибка '+r.status)); }
     const d=await r.json();
+    setStatus('Идёт генерация образа… (до минуты)');
     pollProto(d.task_id, mann, src);
-  }catch(e){ const ov2=mann.querySelector('.ovl'); if(ov2)ov2.remove(); toast('Ошибка: '+(e.message||e)); }
+  }catch(e){ const ov2=mann.querySelector('.ovl'); if(ov2)ov2.remove(); setStatus('Ошибка: '+(e.message||e), true); toast('Ошибка: '+(e.message||e)); }
 }
 
 function pollProto(id, mann, garSrc){
@@ -202,16 +207,18 @@ function pollProto(id, mann, garSrc){
       const r=await fetch('/api/task/'+id); const t=await r.json();
       if(t.status==='done'){ clearInterval(iv);
         const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
-        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url; }
+        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url+'?t='+Date.now(); }
         mann.classList.add('done');
         const old=mann.querySelector('.badge'); if(old)old.remove();
         const b=el('img','badge'); b.src=garSrc; mann.appendChild(b);
         let ok=mann.querySelector('.ok'); if(!ok){ ok=el('div','ok'); ok.textContent='✓ готово'; mann.appendChild(ok); }
+        setStatus('Готово — образ сгенерирован нейросетью.');
         toast('Готово — это реальная генерация нейросети');
       } else if(t.status==='error'){ clearInterval(iv);
         const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
-        toast('Ошибка генерации: '+String(t.error||'').slice(0,140));
-      } else if(n>60){ clearInterval(iv); const ov=mann.querySelector('.ovl'); if(ov)ov.remove(); toast('Слишком долго — попробуйте ещё раз'); }
+        setStatus('Ошибка генерации: '+String(t.error||'').slice(0,200), true);
+        toast('Ошибка генерации — подробности в строке статуса');
+      } else if(n>60){ clearInterval(iv); const ov=mann.querySelector('.ovl'); if(ov)ov.remove(); setStatus('Слишком долго — попробуйте ещё раз', true); }
     }catch(e){ if(n>60){ clearInterval(iv);} }
   }, 2000);
 }
