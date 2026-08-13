@@ -213,10 +213,8 @@ function pollProto(id, mann, garSrc){
       const r=await fetch('/api/task/'+id); const t=await r.json();
       if(t.status==='done'){ clearInterval(iv);
         const ov=mann.querySelector('.ovl'); if(ov)ov.remove();
-        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url+'?t='+Date.now(); }
+        const img=mann.querySelector('img'); if(img && t.url){ img.src=t.url; }
         mann.classList.add('done');
-        const old=mann.querySelector('.badge'); if(old)old.remove();
-        const b=el('img','badge'); b.src=garSrc; mann.appendChild(b);
         let ok=mann.querySelector('.ok'); if(!ok){ ok=el('div','ok'); ok.textContent='✓ готово'; mann.appendChild(ok); }
         setStatus('Готово — образ сгенерирован нейросетью.');
         toast('Готово — это реальная генерация нейросети');
