@@ -163,7 +163,7 @@
     <div class="eco">Ваша экономия средств — до 80%<span class="eco-sub"> в сравнении с фотостудией</span></div>
     <p>Сфотографируйте товар на телефон — получите фото на модели для карточки.</p>
     <div class="badges">
-      <span class="free-badge">🎁 Первое фото (превью) — БЕСПЛАТНО</span>
+      <span class="free-badge">🎁 Первое фото (превью) — БЕСПЛАТНО (только для селлеров с вводом ИНН). Без ввода ИНН — платные пакеты</span>
       <span class="free-badge">🎁 Для пакетов Каталог и Профи — БОНУС — видео в HD качестве</span>
     </div>
     <div class="demo" id="heroDemo">
@@ -176,14 +176,14 @@
   <!-- ШАГ 1 -->
   <div class="card" id="card1">
     <h2><span class="step-num">1</span> Загрузите фото товара <span id="testBadge" class="badge" style="display:none;">тест</span></h2>
-    <div class="sub">Сфотографируйте <b>саму вещь</b> — на манекене, вешалке или разложенной на столе. <b>Не своё фото и не селфи.</b> Можно несколько.</div>
+    <div class="sub">Сфотографируйте <b>саму вещь</b> — на манекене, вешалке или разложенной на столе. <b>Не своё фото и не селфи.</b> Можно несколько. <b>Вещи фотографировать по одной и загружать последовательно.</b>
     <div class="photo-actions">
       <button class="ovalbtn cam" onclick="pickCamera()">📷 Сделать ФОТО ВЕЩИ</button>
       <div class="or">ИЛИ</div>
       <button class="ovalbtn gal" onclick="pickGallery()">Загрузить из ГАЛЕРЕИ изображение ВЕЩИ</button>
     </div>
     <div class="thumbs" id="thumbs"></div>
-    <div class="count-note bad" id="countNote">Добавьте хотя бы одно фото товара.</div>
+    <div class="count-note bad" id="countNote"></div>
     <input type="file" id="fileInput" accept="image/*">
     <input type="file" id="cameraInput" accept="image/*" capture="environment">
   </div>
@@ -199,7 +199,7 @@
   <div class="card dim" id="card3">
     <h2><span class="step-num">3</span> Бесплатное превью</h2>
     <div class="sub">Создайте бесплатное фото на модели (с водяным знаком) — оцените качество.</div>
-    <button class="btn green" id="freeBtn" disabled onclick="startFreePreview()">✨ Создать бесплатное превью</button>
+    <button class="btn green" id="freeBtn" disabled onclick="startFreePreview()">✨ Создать бесплатное превью<br><span style="font-size:12px;font-weight:400;">(только для селлеров с вводом ИНН)</span></button>
     <div id="innGate" style="display:none;margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fbfaf7;">
       <div class="sub" style="margin:0 0 8px;">Этот сервис предназначен только для селлеров маркетплейсов. Для подтверждения введите ИНН (ООО, ИП или самозанятого).</div>
       <input id="innInput" inputmode="numeric" maxlength="12" placeholder="ИНН — 10 или 12 цифр"
@@ -376,7 +376,7 @@ function removeItem(id){ items=items.filter(i=>i.id!==id); renderThumbs(); }
 function updateStep1(){
   const ok=items.length>=1; const note=$('countNote');
   if(ok){ note.className='count-note ok'; note.textContent=`Фото добавлено: ${items.length}. Выберите модель ниже.`; }
-  else{ note.className='count-note bad'; note.textContent='Добавьте хотя бы одно фото товара.'; }
+  else{ note.className='count-note bad'; note.textContent=''; }
   $('card2').classList.toggle('dim', !ok);
 }
 function garments(){ return items.map(i=>i.dataUrl).slice(0,MAX_ITEMS); }
