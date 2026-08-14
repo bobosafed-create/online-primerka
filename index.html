@@ -163,10 +163,11 @@
     <div class="eco">Ваша экономия средств — до 80%<span class="eco-sub"> в сравнении с фотостудией</span></div>
     <p>Сфотографируйте товар на телефон — получите фото на модели для карточки.</p>
     <div class="badges">
-      <span class="free-badge">🎁 Первое фото (превью) — БЕСПЛАТНО (только для селлеров с вводом ИНН). Без ввода ИНН — платные пакеты</span>
+      <span class="free-badge">🎁 Первое фото (предпросмотр) — БЕСПЛАТНО (только для селлеров с вводом ИНН). Без ввода ИНН — платные пакеты</span>
       <span class="free-badge">🎁 Для пакетов Каталог и Профи — БОНУС — видео в HD качестве</span>
     </div>
     <div class="demo" id="heroDemo">
+      <div style="text-align:center;font-weight:800;font-size:14.5px;color:#2b2a28;margin:2px 0 10px;text-transform:uppercase;letter-spacing:.3px;">Пример использования программы</div>
       <div class="gallery" id="gallery"></div>
       <div class="gallery-dots" id="galleryDots"></div>
       <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
@@ -175,8 +176,9 @@
 
   <!-- ШАГ 1 -->
   <div class="card" id="card1">
-    <h2><span class="step-num">1</span> Загрузите фото товара <span id="testBadge" class="badge" style="display:none;">тест</span></h2>
-    <div class="sub">Сфотографируйте <b>саму вещь</b> — на манекене, вешалке или разложенной на столе. <b>Не своё фото и не селфи.</b> Можно несколько. <b>Вещи фотографировать по одной и загружать последовательно.</b>
+    <h2><span class="step-num">1</span> Загрузите фото товара</h2>
+    <button type="button" onclick="openLB('video','/assets/howto.mp4')" style="display:inline-flex;align-items:center;gap:7px;margin:0 0 10px;padding:9px 16px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:22px;font-size:14px;font-weight:700;cursor:pointer;">▶ Посмотрите, как это сделать</button>
+    <div class="sub">Сфотографируйте <b>саму вещь</b> — на манекене, вешалке или разложенной на столе. <b>Не своё фото и не селфи.</b> Можно несколько. Вещи фотографировать по одной. <b>Не забывайте нажать на ГАЛОЧКУ под фото вещи, иначе фото не будет добавлено в ленту для выбора.</b>
     <div class="photo-actions">
       <button class="ovalbtn cam" onclick="pickCamera()">📷 Сделать ФОТО ВЕЩИ</button>
       <div class="or">ИЛИ</div>
@@ -195,11 +197,11 @@
     <div class="manne-grid" id="manneGrid"></div>
   </div>
 
-  <!-- ШАГ 3: бесплатное превью -->
+  <!-- ШАГ 3: бесплатный предпросмотр -->
   <div class="card dim" id="card3">
-    <h2><span class="step-num">3</span> Бесплатное превью</h2>
+    <h2><span class="step-num">3</span> Бесплатный предпросмотр</h2>
     <div class="sub">Создайте бесплатное фото на модели (с водяным знаком) — оцените качество.</div>
-    <button class="btn green" id="freeBtn" disabled onclick="startFreePreview()">✨ Создать бесплатное превью<br><span style="font-size:12px;font-weight:400;">(только для селлеров с вводом ИНН)</span></button>
+    <button class="btn green" id="freeBtn" disabled onclick="startFreePreview()">✨ Создать бесплатный предпросмотр<br><span style="font-size:12px;font-weight:400;">(только для селлеров с вводом ИНН)</span></button>
     <div id="innGate" style="display:none;margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fbfaf7;">
       <div class="sub" style="margin:0 0 8px;">Этот сервис предназначен только для селлеров маркетплейсов. Для подтверждения введите ИНН (ООО, ИП или самозанятого).</div>
       <input id="innInput" inputmode="numeric" maxlength="12" placeholder="ИНН — 10 или 12 цифр"
@@ -209,13 +211,13 @@
         <span>Я селлер и даю согласие на обработку ИНН для проверки статуса (см. <a href="/politika" target="_blank">политику</a>).</span>
       </label>
       <div class="err" id="innErr"></div>
-      <button class="btn green" onclick="confirmInn()">Подтвердить и создать превью</button>
+      <button class="btn green" onclick="confirmInn()">Подтвердить и создать предпросмотр</button>
     </div>
     <div class="err" id="freeErr"></div>
-    <div class="progress" id="freeProgress" style="display:none;"><div class="spinner"></div><div id="freeProgressText">Готовим превью…</div></div>
+    <div class="progress" id="freeProgress" style="display:none;"><div class="spinner"></div><div id="freeProgressText">Готовим предпросмотр…</div></div>
     <div class="result" id="previewResult" style="display:none;">
-      <img id="previewImg" alt="превью">
-      <div class="preview-note">Это бесплатное превью с водяным знаком. Купите пакет — и скачивайте фото в HD без знака.</div>
+      <img id="previewImg" alt="предпросмотр">
+      <div class="preview-note">Это бесплатный предпросмотр с водяным знаком. Купите пакет — и скачивайте фото в HD без знака.</div>
     </div>
     <div class="survey" id="survey" style="display:none;">
       <div class="survey-q">Что вас останавливает от покупки пакета?</div>
@@ -340,7 +342,7 @@ function visitorId(){
 
 fetch('/api/config').then(r=>r.json()).then(cfg=>{
   CONFIG = Object.assign(CONFIG, cfg);
-  if(!CONFIG.paymentsEnabled){ $('testBadge').style.display='inline-block'; }
+  { const _tb=$('testBadge'); if(_tb && !CONFIG.paymentsEnabled){ _tb.style.display='inline-block'; } }
   renderMannequins(); renderPackages();
   const oid = new URLSearchParams(location.search).get('order_id');
   if(oid){ afterPayment(oid); }
@@ -416,7 +418,7 @@ function pollTask(taskId,maxTicks,onDone,onError){
   },3000);
 }
 
-/* ---------- Шаг 3: бесплатное превью ---------- */
+/* ---------- Шаг 3: бесплатный предпросмотр ---------- */
 function startFreePreview(){
   $('freeErr').textContent='';
   if(!selectedMannequin){ $('freeErr').textContent='Выберите модель.'; return; }
@@ -448,7 +450,7 @@ async function doFreePreview(inn, consent){
   try{
     const r=await fetch('/api/free-preview',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({mannequin:selectedMannequin,garments:garments(),visitorId:visitorId(),inn:inn,consent:consent})});
-    if(r.status===429){ $('freeProgress').style.display='none'; $('freeErr').textContent='Бесплатное превью уже использовано. Купите пакет ниже.'; resetFreeBtn(); return; }
+    if(r.status===429){ $('freeProgress').style.display='none'; $('freeErr').textContent='Бесплатный предпросмотр уже использован. Купите пакет ниже.'; resetFreeBtn(); return; }
     if(r.status===403){ const e=await r.json().catch(()=>({}));
       $('freeProgress').style.display='none';
       $('freeErr').textContent=e.detail||'ИНН не найден. Бесплатная генерация доступна только селлерам. Приобретите платный пакет.';
@@ -677,11 +679,11 @@ function renderGallery(){
       return `<img src="${src}" alt="вещь" onclick="openLB('img','${src}')"${oe}>`;
     }).join('');
     return `<div class="look">
-      <div class="look-label">Загрузите ваши вещи:</div>
+      <div class="look-label">ВЕЩИ ДО ПРИМЕРКИ НА МОДЕЛИ</div>
       <div class="look-items">${thumbs}</div>
       <div class="look-arrow">↓${ i<LOOKS.length-1 ? '<span class="swipe-hint" onclick="event.stopPropagation(); scrollGallery()">ещё образы →</span>' : '' }</div>
+      <div class="look-label" style="margin:8px 0 5px;">ГОТОВОЕ ВИДЕО НА МОДЕЛИ</div>
       <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
-      <div class="look-vidcap">Готовое видео на модели 🎬</div>
     </div>`;
   }).join('');
   const dots=$('galleryDots');
