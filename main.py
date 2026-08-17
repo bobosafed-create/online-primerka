@@ -76,6 +76,7 @@ PROTO_KEY = os.getenv("PROTO_KEY", "").strip()   # задайте секрет, 
 
 # Пакеты (цены и число генераций). Менять можно здесь.
 PACKAGES = [
+    {"id": "preview", "title": "1 фото — предпросмотр",       "count": 1,  "videos": 0,  "price": "79.00",   "video": False},
     {"id": "test",    "title": "1 фото (Тест)",               "count": 1,  "videos": 0,  "price": "99.00",   "video": False},
     {"id": "start",   "title": "10 фото (Старт)",             "count": 10, "videos": 0,  "price": "990.00",  "video": False},
     {"id": "catalog", "title": "25 фото + 10 видео (Каталог)", "count": 25, "videos": 10, "price": "2490.00", "video": True},
@@ -687,6 +688,7 @@ def _run_free_preview(task_id, token, mannequin, clothes, vid):
 
 @app.post("/api/free-preview")
 def free_preview(data: FreePreviewIn):
+    raise HTTPException(403, "Бесплатный предпросмотр отключён")
     if not tryon_enabled():
         raise HTTPException(503, "Генерация не настроена (нет ключа WaveSpeed или манекенов)")
     vid = (data.visitorId or "").strip()[:64]

@@ -162,8 +162,9 @@
     <h1>Каталожные фото для Wildberries и Ozon — без фотостудии</h1>
     <div class="eco">Ваша экономия средств — до 80%<span class="eco-sub"> в сравнении с фотостудией</span></div>
     <p>Сфотографируйте товар на телефон — получите фото на модели для карточки.</p>
+    <p>Загрузите фото вещей комплектом — включите стиль с одного взгляда.</p>
     <div class="badges">
-      <span class="free-badge">🎁 Первое фото (предпросмотр) — БЕСПЛАТНО (только для селлеров с вводом ИНН). Без ввода ИНН — платные пакеты</span>
+      <span class="free-badge">🎁 Первое фото (предпросмотр) — по специальной цене 79 руб.</span>
       <span class="free-badge">🎁 Для пакетов Каталог и Профи — БОНУС — видео в HD качестве</span>
     </div>
     <div class="demo" id="heroDemo">
@@ -173,6 +174,15 @@
       <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
     </div>
   </section>
+
+  <!-- АУТФИТ -->
+  <div class="demo" id="autfitDemo" style="margin-bottom:16px;">
+    <div style="text-align:center;font-weight:800;font-size:15px;color:#2b2a28;margin:2px 0 4px;text-transform:uppercase;letter-spacing:.3px;">Аутфит — совершенство в деталях</div>
+    <div class="zoom-hint" style="margin:0 0 8px;">Загрузите комплект вещей — получите готовый образ на модели</div>
+    <div class="gallery" id="autfitGallery"></div>
+    <div class="gallery-dots" id="autfitDots"></div>
+    <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
+  </div>
 
   <!-- ШАГ 1 -->
   <div class="card" id="card1">
@@ -199,41 +209,10 @@
 
   <!-- ШАГ 3: бесплатный предпросмотр -->
   <div class="card dim" id="card3">
-    <h2><span class="step-num">3</span> Бесплатный предпросмотр</h2>
-    <div class="sub">Создайте бесплатное фото на модели (с водяным знаком) — оцените качество.</div>
-    <button class="btn green" id="freeBtn" disabled onclick="startFreePreview()">✨ Создать бесплатный предпросмотр<br><span style="font-size:12px;font-weight:400;">(только для селлеров с вводом ИНН)</span></button>
-    <div id="innGate" style="display:none;margin-top:12px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:#fbfaf7;">
-      <div class="sub" style="margin:0 0 8px;">Этот сервис предназначен только для селлеров маркетплейсов. Для подтверждения введите ИНН (ООО, ИП или самозанятого).</div>
-      <input id="innInput" inputmode="numeric" maxlength="12" placeholder="ИНН — 10 или 12 цифр"
-             style="width:100%;max-width:280px;padding:11px 12px;border:1px solid var(--line);border-radius:8px;font-size:16px;">
-      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;margin:10px 0;color:#6b6558;">
-        <input type="checkbox" id="innConsent" style="margin-top:2px;">
-        <span>Я селлер и даю согласие на обработку ИНН для проверки статуса (см. <a href="/politika" target="_blank">политику</a>).</span>
-      </label>
-      <div class="err" id="innErr"></div>
-      <button class="btn green" onclick="confirmInn()">Подтвердить и создать предпросмотр</button>
-    </div>
+    <h2><span class="step-num">3</span> Предпросмотр</h2>
+    <div class="sub">Создайте фото на модели — оцените качество изображения.</div>
+    <button class="btn green" id="previewBtn" disabled onclick="buyPreview()">✨ Создать предпросмотр по специальной цене 79 ₽</button>
     <div class="err" id="freeErr"></div>
-    <div class="progress" id="freeProgress" style="display:none;"><div class="spinner"></div><div id="freeProgressText">Готовим предпросмотр…</div></div>
-    <div class="result" id="previewResult" style="display:none;">
-      <img id="previewImg" alt="предпросмотр">
-      <div class="preview-note">Это бесплатный предпросмотр с водяным знаком. Купите пакет — и скачивайте фото в HD без знака.</div>
-    </div>
-    <div class="survey" id="survey" style="display:none;">
-      <div class="survey-q">Что вас останавливает от покупки пакета?</div>
-      <div class="survey-opts" id="surveyOpts">
-        <button onclick="sendFeedback('дорого')">Дорого</button>
-        <button onclick="sendFeedback('не уверен в качестве')">Не уверен в качестве</button>
-        <button onclick="sendFeedback('не разобрался')">Не разобрался, как купить</button>
-        <button onclick="sendFeedback('просто смотрю')">Просто смотрю</button>
-        <button onclick="sendFeedback('другое')">Другое</button>
-      </div>
-      <div id="surveyComment" style="display:none;margin-top:10px;">
-        <input type="text" id="surveyCommentInput" placeholder="Напишите, что именно (по желанию)" maxlength="500">
-        <button class="btn" style="margin-top:8px;" onclick="sendFeedbackComment()">Отправить</button>
-      </div>
-      <div class="survey-thanks" id="surveyThanks" style="display:none;">Спасибо за ответ! 🙏</div>
-    </div>
   </div>
 
   <!-- ШАГ 4: пакеты -->
@@ -403,7 +382,7 @@ function scrollManne(gid, dir){
 function selectMannequin(id){
   selectedMannequin=id;
   document.querySelectorAll('.manne').forEach(x=>x.classList.toggle('sel',+x.dataset.id===id));
-  $('card3').classList.remove('dim'); $('freeBtn').disabled=false;
+  $('card3').classList.remove('dim'); { const _pb=$('previewBtn'); if(_pb) _pb.disabled=false; }
 }
 
 /* ---------- Универсальный опрос ---------- */
@@ -474,9 +453,18 @@ async function doFreePreview(inn, consent){
 
 /* ---------- Шаг 4: пакеты ---------- */
 function fmt(p){ return String(p).replace(/\.00$/,''); }
+function buyPreview(){
+  $('freeErr').textContent='';
+  if(!selectedMannequin){ $('freeErr').textContent='Выберите модель.'; return; }
+  if(!items.length){ $('freeErr').textContent='Добавьте фото товара.'; return; }
+  selectedPackage='preview';
+  buyPackage();
+}
+
 function renderPackages(){
   const grid=$('pkgGrid'); grid.innerHTML='';
   (CONFIG.packages||[]).forEach(p=>{
+    if(p.id==='preview') return;
     const d=document.createElement('div'); d.className='pkg'; d.dataset.id=p.id;
     const best = p.id==='catalog' ? '<span class="best">выгодно</span>' : '';
     const per = p.count>1 ? `≈ ${Math.round(Number(p.price)/p.count)} ₽ за фото` : 'разовая генерация';
@@ -664,6 +652,36 @@ const LOOKS = [
   {items:['/assets/look1_b1.jpg','/assets/look1_b2.jpg','/assets/look1_b3.jpg','/assets/look1_b4.jpg','/assets/look1_b5.jpg'], video:'/assets/look1_after.mp4', poster:'/assets/look1_poster.jpg'},
   {items:['/assets/look2_b1.jpg','/assets/look2_b2.jpg','/assets/look2_b3.jpg','/assets/look2_b4.jpg','/assets/look2_b5.jpg'], video:'/assets/look2_after.mp4', poster:'/assets/look2_poster.jpg'}
 ];
+const OUTFITS = [
+  {before:'/assets/before10.jpg', video:'/assets/after10.mp4', poster:'/assets/after10_poster.jpg'},
+  {before:'/assets/before11.jpg', video:'/assets/after11.mp4', poster:'/assets/after11_poster.jpg'},
+  {before:'/assets/before12.jpg', video:'/assets/after12.mp4', poster:'/assets/after12_poster.jpg'}
+];
+function scrollAutfit(){
+  const g=$('autfitGallery'); if(!g) return;
+  const looks=g.querySelectorAll('.look'); if(!looks.length) return;
+  const cur=Math.round(g.scrollLeft/g.clientWidth);
+  const next=(cur+1)%looks.length;
+  g.scrollTo({left: looks[next].offsetLeft, behavior:'smooth'});
+}
+function renderOutfits(){
+  const g=$('autfitGallery'); if(!g) return;
+  g.innerHTML = OUTFITS.map((L,i)=>`<div class="look">
+      <div class="look-label">Комплект до примерки на модели</div>
+      <img src="${L.before}" alt="комплект" style="width:100%;max-width:200px;border-radius:10px;display:block;margin:0 auto;cursor:zoom-in;" onclick="openLB('img','${L.before}')">
+      <div class="look-arrow">↓${ i<OUTFITS.length-1 ? '<span class="swipe-hint" onclick="event.stopPropagation(); scrollAutfit()">ещё →</span>' : '' }</div>
+      <div class="look-label" style="margin:8px 0 5px;">ГОТОВОЕ ВИДЕО НА МОДЕЛИ</div>
+      <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
+    </div>`).join('');
+  const dots=$('autfitDots');
+  if(dots){ dots.innerHTML = OUTFITS.map((_,i)=>`<span class="${i===0?'on':''}"></span>`).join(''); }
+  const vids=g.querySelectorAll('video');
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver((ents)=>{ ents.forEach(e=>{ const v=e.target;
+      if(e.isIntersecting && e.intersectionRatio>0.6){ try{v.play();}catch(_){} } else { try{v.pause();}catch(_){} } }); },{threshold:[0,0.6,1]});
+    vids.forEach(v=>io.observe(v));
+  }
+}
 function scrollGallery(){
   const g=$('gallery'); if(!g) return;
   const looks=g.querySelectorAll('.look'); if(!looks.length) return;
@@ -744,6 +762,7 @@ async function postFeedback(reason, comment){
 }
 
 renderGallery();   // построить галерею примеров (независимо от конфигурации)
+renderOutfits();   // блок АУТФИТ
 renderFaq();       // загрузить вопросы и ответы из базы
 </script>
 </body>
