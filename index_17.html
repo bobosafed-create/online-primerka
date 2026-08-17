@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="yandex-verification" content="45c5406b95348aae" />
+<title>StyleGlobe для селлеров — каталожные фото для Wildberries и Ozon</title>
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+  window.METRIKA_ID = __METRIKA_ID__ || 0;
+  (function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};m[i].l=1*new Date();
+  for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return;}}
+  k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})
+  (window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");
+  if(window.METRIKA_ID){ ym(window.METRIKA_ID,"init",{clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true}); }
+  function goal(name){ try{ if(window.METRIKA_ID && window.ym){ ym(window.METRIKA_ID,'reachGoal',name); } }catch(e){} }
+</script>
+<!-- /Yandex.Metrika counter -->
+<style>
+  :root{--accent:#e5395b;--accent-dark:#c72a49;--green:#39b36a;--amber:#f0a92e;
+        --ink:#1d1d22;--muted:#6c6c76;--bg:#f5f3f1;--card:#fff;--line:#eceae6;--terra:#a8442a;}
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Helvetica Neue',Arial,sans-serif;background:var(--bg);color:var(--ink);}
+  .wrap{max-width:640px;margin:0 auto;padding:14px 14px 60px;}
+  .site-header{padding:4px 2px 12px;}
+  .brand{font-family:Georgia,serif;font-size:22px;font-weight:700;letter-spacing:-.4px;}
+  .brand .s2{color:var(--accent);}
+
+  .hero{background:linear-gradient(145deg,#fff,#fff8f3);border:1px solid #eadfd8;border-radius:22px;
+        padding:22px 18px;margin-bottom:16px;box-shadow:0 12px 30px rgba(65,38,28,.07);}
+  .hero h1{font-family:Georgia,serif;font-size:clamp(25px,7vw,36px);line-height:1.08;margin:0 0 10px;color:#251c1f;}
+  .hero p{font-family:Georgia,serif;color:var(--terra);font-size:17px;line-height:1.4;margin:0 0 14px;font-weight:600;}
+  .hero .eco{font-family:Georgia,serif;font-weight:800;color:var(--accent-dark);
+             font-size:clamp(18px,5.2vw,25px);line-height:1.12;margin:0 0 14px;}
+  .hero .eco .eco-sub{font-weight:600;font-size:0.72em;}
+  .badges{display:flex;flex-direction:column;gap:8px;align-items:flex-start;}
+  .demo{margin-top:16px;background:#fff;border:1px solid #eadfd8;border-radius:14px;padding:10px 12px;}
+  .demo-row{display:flex;align-items:center;gap:10px;justify-content:center;}
+  .demo figure{margin:0;text-align:center;}
+  .demo .befores{width:92px;}
+  .demo .video-fig{width:172px;}
+  .demo .befores-imgs{display:flex;flex-direction:column;gap:6px;}
+  .demo .befores-imgs img{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;display:block;}
+  .demo video{width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:10px;display:block;background:#eee;}
+  .demo figcaption{font-size:12px;color:#8a7f78;margin-top:5px;font-weight:700;}
+  .demo .arrow{font-size:26px;color:var(--accent);font-weight:800;flex:0 0 auto;}
+  .survey{margin-top:16px;background:#fff;border:1px dashed var(--line);border-radius:12px;padding:14px 16px;}
+  .survey-q{font-weight:800;font-size:15px;margin-bottom:10px;}
+  .survey-opts{display:flex;flex-direction:column;gap:8px;}
+  .survey-opts button{text-align:left;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:#faf6ef;font-size:14.5px;cursor:pointer;color:var(--ink,#2b2a28);}
+  .survey-opts button:active{border-color:var(--accent);}
+  .survey-thanks{color:var(--green);font-weight:700;margin-top:8px;}
+  #surveyCommentInput{width:100%;padding:11px;border:1px solid var(--line);border-radius:10px;font-size:14.5px;}
+  .demo img,.demo video{cursor:zoom-in;}
+  .demo .zoom-hint{font-size:13.5px;color:#8a7f78;font-weight:700;text-align:center;margin-top:10px;}
+  .gallery{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;gap:12px;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+  .gallery::-webkit-scrollbar{display:none;}
+  .look{scroll-snap-align:center;flex:0 0 100%;box-sizing:border-box;}
+  .look-label{font-size:12.5px;color:#8a7f78;font-weight:700;margin:0 0 7px;}
+  .look-items{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;}
+  .look-items::-webkit-scrollbar{display:none;}
+  .look-items img{width:60px;height:60px;flex:0 0 auto;object-fit:cover;border-radius:8px;cursor:zoom-in;border:1px solid var(--line);}
+  .look-arrow{position:relative;text-align:center;font-size:22px;color:var(--accent);font-weight:800;margin:6px 0;}
+  .swipe-hint{position:absolute;right:2px;top:50%;transform:translateY(-50%);font-size:12.5px;color:var(--accent);font-weight:800;white-space:nowrap;cursor:pointer;}
+  .look video{width:100%;max-width:240px;aspect-ratio:1/1;object-fit:cover;border-radius:12px;display:block;margin:0 auto;cursor:zoom-in;background:#eee;}
+  .look-vidcap{font-size:12.5px;color:#8a7f78;font-weight:700;text-align:center;margin-top:7px;}
+  .gallery-dots{display:flex;gap:7px;justify-content:center;margin-top:10px;}
+  .gallery-dots span{width:8px;height:8px;border-radius:50%;background:#d8cfbc;transition:background .2s;}
+  .gallery-dots span.on{background:var(--accent);}
+  .lightbox{position:fixed;inset:0;background:rgba(0,0,0,.93);display:none;align-items:center;justify-content:center;z-index:9999;padding:14px;}
+  .lightbox.open{display:flex;}
+  .lightbox img,.lightbox video{max-width:100%;max-height:92vh;border-radius:10px;box-shadow:0 10px 40px rgba(0,0,0,.5);}
+  .lightbox .lb-close{position:absolute;top:12px;right:18px;color:#fff;font-size:38px;line-height:1;font-weight:700;cursor:pointer;}
+  .faq{border-top:1px solid var(--line);padding:11px 0;}
+  .faq summary{cursor:pointer;font-weight:700;font-size:15px;color:#2b2a28;list-style:none;position:relative;padding-right:26px;}
+  .faq summary::-webkit-details-marker{display:none;}
+  .faq summary::after{content:'+';position:absolute;right:2px;top:-2px;font-size:22px;color:var(--accent);font-weight:800;}
+  .faq[open] summary::after{content:'–';}
+  .faq p{margin:8px 0 2px;color:#6b6558;font-size:14px;line-height:1.5;}
+  .sg-input{width:100%;padding:12px;border:1px solid var(--line);border-radius:12px;font-size:14.5px;font-family:inherit;box-sizing:border-box;}
+  textarea.sg-input{resize:vertical;}
+  .my-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;margin-top:14px;}
+  .my-item{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:#faf6ef;}
+  .my-item img,.my-item video{width:100%;aspect-ratio:1/1;object-fit:cover;display:block;background:#000;cursor:zoom-in;}
+  .my-item a{display:block;text-align:center;font-size:12.5px;font-weight:800;color:var(--accent);padding:7px 4px;text-decoration:none;}
+  .free-badge{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;
+              padding:8px 14px;font-size:14px;font-weight:800;}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px;margin-bottom:16px;
+        box-shadow:0 2px 10px rgba(0,0,0,.03);}
+  .card.dim{opacity:.5;pointer-events:none;}
+  h2{font-size:17px;margin:0 0 4px;display:flex;align-items:center;gap:9px;}
+  .step-num{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;
+            display:inline-flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;}
+  .sub{color:var(--muted);font-size:13.5px;margin:2px 0 14px;}
+
+  .photo-actions{display:flex;flex-direction:column;align-items:center;gap:10px;}
+  .ovalbtn{width:100%;border:none;border-radius:40px;color:#fff;font-weight:800;cursor:pointer;box-shadow:0 5px 14px rgba(0,0,0,.12);}
+  .ovalbtn.cam{background:var(--green);font-size:19px;padding:18px 12px;}
+  .ovalbtn.gal{background:var(--amber);font-size:16px;padding:14px 12px;}
+  .or{color:var(--muted);font-size:13px;font-weight:700;}
+  .thumbs{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px;}
+  .thumb{position:relative;width:78px;height:98px;border-radius:10px;overflow:hidden;border:2px solid var(--line);background:#f0ece7;}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block;}
+  .thumb .del{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;border:none;font-size:13px;cursor:pointer;line-height:1;}
+  .count-note{font-size:13px;margin-top:12px;}
+  .count-note.ok{color:var(--green);} .count-note.bad{color:var(--muted);}
+
+  .btn{display:block;width:100%;border:none;border-radius:14px;padding:16px;font-size:16px;font-weight:800;color:#fff;background:var(--accent);cursor:pointer;box-shadow:0 6px 16px rgba(229,57,91,.28);}
+  .btn:disabled{background:#cdc7c0;box-shadow:none;cursor:not-allowed;}
+  .btn.green{background:var(--green);box-shadow:0 6px 16px rgba(57,179,106,.28);}
+
+  .manne-grid{position:relative;margin:6px 0 4px;}
+  .mn-track{display:flex;gap:10px;overflow-x:auto;scroll-snap-type:x proximity;padding:2px 4px;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+  .mn-track::-webkit-scrollbar{display:none;}
+  .manne{flex:0 0 auto;width:104px;scroll-snap-align:center;border:2px solid var(--line);border-radius:14px;overflow:hidden;cursor:pointer;background:#000;aspect-ratio:3/4;}
+  .manne.sel{border-color:var(--accent);box-shadow:0 0 0 3px rgba(229,57,91,.18);}
+  .manne img{width:100%;height:100%;object-fit:cover;display:block;}
+  .mn-arrow{position:absolute;top:50%;transform:translateY(-50%);z-index:2;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--accent);font-size:22px;font-weight:800;line-height:30px;text-align:center;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.15);padding:0;}
+  .mn-arrow.left{left:-6px;} .mn-arrow.right{right:-6px;}
+
+  .progress{text-align:center;padding:20px 6px;}
+  .spinner{width:40px;height:40px;border:4px solid var(--line);border-top-color:var(--accent);border-radius:50%;margin:0 auto 12px;animation:spin 1s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .result img,.result video{width:100%;border-radius:14px;background:#000;display:block;}
+  .dl{display:inline-block;margin-top:12px;color:var(--accent);font-weight:700;text-decoration:none;}
+  .preview-note{margin-top:10px;text-align:center;font-size:13px;color:var(--muted);}
+
+  /* Пакеты */
+  .pkg-grid{display:grid;gap:12px;}
+  .pkg{border:2px solid var(--line);border-radius:14px;padding:14px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;}
+  .pkg.sel{border-color:var(--accent);box-shadow:0 0 0 3px rgba(229,57,91,.15);}
+  .pkg .t{font-weight:800;font-size:15.5px;}
+  .pkg .d{font-size:12.5px;color:var(--muted);margin-top:2px;}
+  .pkg .p{font-weight:800;font-size:17px;white-space:nowrap;color:var(--accent-dark);}
+  .pkg .best{display:inline-block;background:#fff0d6;color:#a56a00;border-radius:8px;padding:2px 8px;font-size:11px;font-weight:800;margin-left:6px;}
+
+  .code-box{background:#0f1830;color:#eaf0ff;border-radius:16px;padding:18px;text-align:center;margin-bottom:16px;}
+  .code-box .code{font-family:'Courier New',monospace;font-size:26px;font-weight:800;letter-spacing:2px;margin:8px 0;}
+  .code-box .bal{font-size:15px;}
+  .code-box small{color:#9fb0d6;display:block;margin-top:8px;font-size:12px;}
+
+  .balance-pill{display:inline-block;background:#eafaf0;color:#1f7a44;border:1px solid #bfe9cf;border-radius:999px;padding:6px 12px;font-weight:800;font-size:14px;}
+  .resume{display:flex;gap:8px;margin-top:10px;}
+  .resume input{flex:1;padding:12px;border-radius:10px;border:1px solid var(--line);font-size:15px;}
+  .resume button{border:none;border-radius:10px;background:var(--ink);color:#fff;font-weight:700;padding:0 16px;cursor:pointer;}
+
+  .foot{text-align:center;font-size:12px;color:#a7a4a4;margin-top:18px;}
+  .foot a{color:#8b8890;text-decoration:none;margin:0 5px;}
+  .err{color:var(--accent-dark);font-size:13.5px;margin-top:10px;}
+  .badge{display:inline-block;background:#fff0d6;color:#a56a00;border-radius:8px;padding:3px 9px;font-size:12px;font-weight:700;margin-left:6px;}
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="site-header">
+    <div class="brand">Style<span class="s2">Globe</span> · для селлеров</div>
+  </header>
+
+  <section class="hero">
+    <h1>Каталожные фото для Wildberries и Ozon — без фотостудии</h1>
+    <div class="eco">Ваша экономия средств — до 80%<span class="eco-sub"> в сравнении с фотостудией</span></div>
+    <p>Сфотографируйте товар на телефон — получите фото на модели для карточки.</p>
+    <p>Загрузите фото вещей комплектом — включите стиль с одного взгляда.</p>
+    <div class="badges">
+      <span class="free-badge">🎁 Первое фото (предпросмотр) — по специальной цене 79 руб.</span>
+      <span class="free-badge">🎁 Для пакетов Каталог и Профи — БОНУС — видео в HD качестве</span>
+    </div>
+    <div class="demo" id="heroDemo">
+      <div style="text-align:center;font-weight:800;font-size:14.5px;color:#2b2a28;margin:2px 0 10px;text-transform:uppercase;letter-spacing:.3px;">Пример использования программы</div>
+      <div class="gallery" id="gallery"></div>
+      <div class="gallery-dots" id="galleryDots"></div>
+      <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
+    </div>
+  </section>
+
+  <!-- АУТФИТ -->
+  <div class="demo" id="autfitDemo" style="margin-bottom:16px;">
+    <div style="text-align:center;font-weight:800;font-size:15px;color:#2b2a28;margin:2px 0 4px;text-transform:uppercase;letter-spacing:.3px;">Аутфит — совершенство в деталях</div>
+    <div class="zoom-hint" style="margin:0 0 8px;">Загрузите комплект вещей — получите готовый образ на модели</div>
+    <div class="gallery" id="autfitGallery"></div>
+    <div class="gallery-dots" id="autfitDots"></div>
+    <div class="zoom-hint">👆 Нажмите на фото или видео, чтобы рассмотреть на весь экран</div>
+  </div>
+
+  <!-- ШАГ 1 -->
+  <div class="card" id="card1">
+    <h2><span class="step-num">1</span> Загрузите фото товара</h2>
+    <button type="button" onclick="openLB('video','/assets/howto.mp4')" style="display:inline-flex;align-items:center;gap:7px;margin:0 0 10px;padding:9px 16px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:22px;font-size:14px;font-weight:700;cursor:pointer;">▶ Посмотрите, как это сделать</button>
+    <div class="sub">Сфотографируйте <b>саму вещь</b> — на манекене, вешалке или разложенной на столе. <b>Не своё фото и не селфи.</b> Можно несколько. Вещи фотографировать по одной. Не забывайте нажать на <b>ГАЛОЧКУ</b> под фото вещи, иначе фото не будет добавлено в ленту для выбора.</div>
+    <div class="photo-actions" style="margin-top:14px;">
+      <button class="ovalbtn cam" onclick="pickCamera()">📷 Сделать ФОТО ВЕЩИ</button>
+      <div class="or">ИЛИ</div>
+      <button class="ovalbtn gal" onclick="pickGallery()">Загрузить из ГАЛЕРЕИ изображение ВЕЩИ</button>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+    <div class="count-note bad" id="countNote"></div>
+    <input type="file" id="fileInput" accept="image/*">
+    <input type="file" id="cameraInput" accept="image/*" capture="environment">
+  </div>
+
+  <!-- ШАГ 2 -->
+  <div class="card dim" id="card2">
+    <h2><span class="step-num">2</span> Выберите модель</h2>
+    <div class="sub">Товар «наденется» на выбранную модель.</div>
+    <div class="manne-grid" id="manneGrid"></div>
+  </div>
+
+  <!-- ШАГ 3: бесплатный предпросмотр -->
+  <div class="card dim" id="card3">
+    <h2><span class="step-num">3</span> Предпросмотр</h2>
+    <div class="sub">Создайте фото на модели — оцените качество изображения.</div>
+    <button class="btn green" id="previewBtn" disabled onclick="buyPreview()">✨ Создать предпросмотр по специальной цене 79 ₽</button>
+    <div class="err" id="freeErr"></div>
+  </div>
+
+  <!-- ШАГ 4: пакеты -->
+  <div class="card" id="card4">
+    <h2><span class="step-num">4</span> Купите пакет генераций</h2>
+    <div class="sub">Оплатите пакет — получите код доступа с балансом. По коду создавайте фото в HD без водяного знака.</div>
+    <div class="pkg-grid" id="pkgGrid"></div>
+    <input type="email" id="buyEmail" class="sg-input" placeholder="Email — пришлём код доступа (рекомендуем)" style="margin-top:12px;">
+    <button class="btn" id="buyBtn" disabled onclick="buyPackage()" style="margin-top:10px;">Выберите пакет</button>
+    <div class="err" id="buyErr"></div>
+    <div class="sub" style="margin-top:14px;">Уже покупали? Введите код доступа:</div>
+    <div class="resume">
+      <input type="text" id="codeInput" placeholder="SG-XXXX-XXXX" autocapitalize="characters">
+      <button onclick="applyCode()">Войти</button>
+    </div>
+    <div class="err" id="codeErr"></div>
+  </div>
+
+  <!-- РАБОЧАЯ ЗОНА (после оплаты / по коду) -->
+  <div id="workArea" style="display:none;">
+    <div class="code-box" id="codeBox" style="display:none;">
+      <div>Ваш код доступа — сохраните его:</div>
+      <div class="code" id="codeValue">—</div>
+      <div class="bal">Осталось: 📸 <b id="codeCredits">0</b> фото<span id="codeVideoWrap"> · 🎬 <b id="codeVideos">0</b> видео</span></div>
+      <small>По этому коду можно вернуться и продолжить в любой момент.</small>
+    </div>
+
+    <div class="card" id="genCard">
+      <h2><span class="step-num">✓</span> Создание фото / видео в HD</h2>
+      <div class="sub">Баланс: <span class="balance-pill" id="balancePill">0 фото</span> <span class="balance-pill" id="balancePillVideo" style="background:#efe8ff;color:#5b3fb0;border-color:#d6c9f5;display:none;">0 видео</span></div>
+      <div class="sub" style="margin-top:8px;">Загрузите вещь или вещи (по одной) или комплект.</div>
+      <div class="photo-actions">
+        <button class="ovalbtn cam" onclick="pickCamera()">📷 Сделать ФОТО ВЕЩИ</button>
+        <div class="or">ИЛИ</div>
+        <button class="ovalbtn gal" onclick="pickGallery()">Загрузить из ГАЛЕРЕИ изображение ВЕЩИ</button>
+      </div>
+      <div class="thumbs" id="thumbs2"></div>
+      <div class="manne-grid" id="manneGrid2" style="margin-top:14px;"></div>
+      <button class="btn" id="genBtn" onclick="generate('photo')" style="margin-top:14px;">📸 Создать фото в HD (−1 фото)</button>
+      <button class="btn" id="genVideoBtn" onclick="generate('video')" style="margin-top:10px;display:none;background:#8a5cf6;box-shadow:none;">🎬 Создать видео (−1 видео)</button>
+      <div class="err" id="genErr"></div>
+      <button class="btn" id="buyMoreBtn" onclick="buyMore()" style="margin-top:12px;background:var(--green);box-shadow:none;">🛒 Купить ещё пакет</button>
+      <div class="progress" id="genProgress" style="display:none;"><div class="spinner"></div><div id="genProgressText">Готовим…</div></div>
+      <div class="result" id="genResult" style="display:none;">
+        <video id="genVideo" controls autoplay loop muted playsinline style="display:none;"></video>
+        <img id="genImg" alt="результат" style="display:none;">
+        <a class="dl" id="genDl" href="#" download="styleglobe-hd">⬇ Скачать</a>
+      </div>
+    </div>
+
+    <div class="card" id="myWorks">
+      <h2>🗂 Мои образы</h2>
+      <div class="sub">Все фото и видео, созданные по этому коду. Можно скачать заново в любой момент.</div>
+      <button class="btn" id="myBtn" onclick="loadMine()" style="margin-top:12px;">Показать мои образы</button>
+      <div class="my-grid" id="myGrid"></div>
+    </div>
+  </div>
+
+  <!-- Вопросы и ответы -->
+  <div class="card" id="faqCard" style="display:none;">
+    <h2>❓ Вопросы и ответы</h2>
+    <div id="faqList"></div>
+  </div>
+
+  <!-- Ваши предложения и замечания -->
+  <div class="card">
+    <h2>💬 Ваши предложения и замечания</h2>
+    <div class="sub">Помогите сделать сервис лучше — напишите, что понравилось или что стоит улучшить.</div>
+    <textarea id="sgMsg" class="sg-input" rows="3" placeholder="Ваше сообщение…" maxlength="1000"></textarea>
+    <input type="text" id="sgContact" class="sg-input" placeholder="Email или телефон для ответа (по желанию)" maxlength="120" style="margin-top:8px;">
+    <button class="btn" onclick="sendSuggestion()" style="margin-top:12px;">Отправить</button>
+    <div class="err" id="sgErr"></div>
+    <div class="survey-thanks" id="sgThanks" style="display:none;">Спасибо! Мы прочитаем ваше сообщение. 🙏</div>
+  </div>
+
+  <div class="foot">
+    <a href="/oferta" target="_blank">Оферта</a>·
+    <a href="/politika" target="_blank">Конфиденциальность</a>·
+    <a href="/kontakty" target="_blank">Контакты</a>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox" onclick="closeLB()">
+  <span class="lb-close" onclick="closeLB()">×</span>
+  <img id="lbImg" style="display:none;" alt="" onclick="event.stopPropagation()">
+  <video id="lbVideo" style="display:none;" controls loop playsinline onclick="event.stopPropagation()"></video>
+</div>
+
+<script>
+let CONFIG = {currency:'RUB', packages:[], paymentsEnabled:false, tryonEnabled:false, mannequins:[], maxItems:8};
+let items = [];               // {id, dataUrl}  (общий буфер загрузки)
+let idc = 1;
+let selectedMannequin = null;
+let selectedPackage = null;
+let currentCode = null;
+let creditsLeft = 0;
+let videoLeft = 0;
+let hasVideo = false;
+const $ = id => document.getElementById(id);
+const MAX_ITEMS = 8;
+
+function visitorId(){
+  let v=null; try{ v=localStorage.getItem('sg_visitor'); }catch(e){}
+  if(!v){ v=Date.now().toString(36)+Math.random().toString(36).slice(2,10); try{localStorage.setItem('sg_visitor',v);}catch(e){} }
+  return v;
+}
+
+fetch('/api/config').then(r=>r.json()).then(cfg=>{
+  CONFIG = Object.assign(CONFIG, cfg);
+  { const _tb=$('testBadge'); if(_tb && !CONFIG.paymentsEnabled){ _tb.style.display='inline-block'; } }
+  renderMannequins(); renderPackages();
+  const oid = new URLSearchParams(location.search).get('order_id');
+  if(oid){ afterPayment(oid); }
+}).catch(()=>{});
+
+/* ---------- Загрузка фото ---------- */
+function pickCamera(){ if(items.length>=MAX_ITEMS){alert('Достаточно фото.');return;} $('cameraInput').click(); }
+function pickGallery(){ if(items.length>=MAX_ITEMS){alert('Достаточно фото.');return;} $('fileInput').click(); }
+function handlePicked(input){
+  const f=input.files[0]; input.value='';
+  if(!f) return;
+  const img=new Image(); const rd=new FileReader();
+  rd.onload=()=>{ img.onload=()=>{ items.push({id:idc++, dataUrl:downscale(img,1024)}); renderThumbs(); }; img.src=rd.result; };
+  rd.readAsDataURL(f);
+}
+$('fileInput').addEventListener('change',e=>handlePicked(e.target));
+$('cameraInput').addEventListener('change',e=>handlePicked(e.target));
+function downscale(img,max){
+  let {width:w,height:h}=img;
+  if(Math.max(w,h)>max){const k=max/Math.max(w,h);w=Math.round(w*k);h=Math.round(h*k);}
+  const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+  return c.toDataURL('image/jpeg',0.9);
+}
+function renderThumbs(){
+  [ 'thumbs','thumbs2' ].forEach(bid=>{
+    const box=$(bid); if(!box) return; box.innerHTML='';
+    items.forEach(it=>{ const d=document.createElement('div');d.className='thumb';
+      d.innerHTML=`<img src="${it.dataUrl}"><button class="del" onclick="removeItem(${it.id})">×</button>`; box.appendChild(d); });
+  });
+  updateStep1();
+}
+function removeItem(id){ items=items.filter(i=>i.id!==id); renderThumbs(); }
+function updateStep1(){
+  const ok=items.length>=1; const note=$('countNote');
+  if(ok){ note.className='count-note ok'; note.textContent=`Фото добавлено: ${items.length}. Выберите модель ниже.`; }
+  else{ note.className='count-note bad'; note.textContent=''; }
+  $('card2').classList.toggle('dim', !ok);
+}
+function garments(){ return items.map(i=>i.dataUrl).slice(0,MAX_ITEMS); }
+
+/* ---------- Модели ---------- */
+function renderMannequins(){
+  const list = (CONFIG.mannequins&&CONFIG.mannequins.length)?CONFIG.mannequins:[{id:1},{id:2},{id:3}];
+  ['manneGrid','manneGrid2'].forEach(gid=>{
+    const grid=$(gid); if(!grid) return;
+    const cards = list.map(m=>`<div class="manne" data-id="${m.id}" onclick="selectMannequin(${m.id})"><img src="/model/${m.id}" alt="модель ${m.id}"></div>`).join('');
+    grid.innerHTML =
+      `<button type="button" class="mn-arrow left" onclick="scrollManne('${gid}',-1)">‹</button>`+
+      `<div class="mn-track">${cards}</div>`+
+      `<button type="button" class="mn-arrow right" onclick="scrollManne('${gid}',1)">›</button>`;
+  });
+}
+function scrollManne(gid, dir){
+  const grid=$(gid); if(!grid) return;
+  const track=grid.querySelector('.mn-track'); if(!track) return;
+  track.scrollBy({left: dir*Math.max(170, track.clientWidth*0.7), behavior:'smooth'});
+}
+function selectMannequin(id){
+  selectedMannequin=id;
+  document.querySelectorAll('.manne').forEach(x=>x.classList.toggle('sel',+x.dataset.id===id));
+  $('card3').classList.remove('dim'); { const _pb=$('previewBtn'); if(_pb) _pb.disabled=false; }
+}
+
+/* ---------- Универсальный опрос ---------- */
+function pollTask(taskId,maxTicks,onDone,onError){
+  let n=0;
+  const iv=setInterval(async()=>{ n++;
+    try{ const r=await fetch('/api/task/'+taskId,{cache:'no-store'}); const d=await r.json();
+      if(d.status==='done'){clearInterval(iv);onDone(d);return;}
+      if(d.status==='error'){clearInterval(iv);onError(d.error||'ошибка');return;}
+    }catch(e){}
+    if(n>maxTicks){clearInterval(iv);onError('превышено время ожидания');}
+  },3000);
+}
+
+/* ---------- Шаг 3: бесплатный предпросмотр ---------- */
+function startFreePreview(){
+  $('freeErr').textContent='';
+  if(!selectedMannequin){ $('freeErr').textContent='Выберите модель.'; return; }
+  if(!items.length){ $('freeErr').textContent='Добавьте фото товара.'; return; }
+  if(CONFIG.innGate){            // сервис только для селлеров — сначала подтверждение ИНН
+    $('freeBtn').style.display='none';
+    $('innErr').textContent='';
+    $('innGate').style.display='block';
+    $('innInput').focus();
+    return;
+  }
+  doFreePreview('', false);
+}
+
+function confirmInn(){
+  $('innErr').textContent='';
+  const inn=($('innInput').value||'').replace(/\D/g,'');
+  if(inn.length!==10 && inn.length!==12){ $('innErr').textContent='Введите ИНН: 10 цифр для организации или 12 для ИП/самозанятого.'; return; }
+  if(!$('innConsent').checked){ $('innErr').textContent='Отметьте согласие на обработку данных.'; return; }
+  $('innGate').style.display='none';
+  doFreePreview(inn, true);
+}
+
+function resetFreeBtn(){ $('freeBtn').style.display=''; $('freeBtn').disabled=false; }
+
+async function doFreePreview(inn, consent){
+  $('freeBtn').disabled=true; $('freeProgress').style.display='block'; $('previewResult').style.display='none';
+  $('freeProgressText').textContent='Идёт генерация образа…';
+  try{
+    const r=await fetch('/api/free-preview',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mannequin:selectedMannequin,garments:garments(),visitorId:visitorId(),inn:inn,consent:consent})});
+    if(r.status===429){ $('freeProgress').style.display='none'; $('freeErr').textContent='Бесплатный предпросмотр уже использован. Купите пакет ниже.'; resetFreeBtn(); return; }
+    if(r.status===403){ const e=await r.json().catch(()=>({}));
+      $('freeProgress').style.display='none';
+      $('freeErr').textContent=e.detail||'ИНН не найден. Бесплатная генерация доступна только селлерам. Приобретите платный пакет.';
+      goal('inn_rejected'); resetFreeBtn();
+      $('card4').scrollIntoView({behavior:'smooth',block:'start'}); return; }
+    if(r.status===422||r.status===400){ const e=await r.json().catch(()=>({}));
+      $('freeProgress').style.display='none';
+      $('innErr').textContent=e.detail||'Проверьте ИНН и согласие.';
+      $('innGate').style.display='block'; $('freeBtn').style.display='none'; return; }
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
+    const d=await r.json(); const tok=d.token;
+    pollTask(d.task_id,40,(res)=>{ $('freeProgress').style.display='none';
+      $('previewImg').src=(res.previewUrl||('/api/preview/'+tok))+'?t='+Date.now();
+      $('previewResult').style.display='block';
+      goal('preview_created');
+      $('survey').style.display='block';
+      $('card4').scrollIntoView({behavior:'smooth',block:'start'});
+    },(err)=>{ $('freeProgress').style.display='none'; $('freeErr').textContent='Не удалось: '+err; resetFreeBtn(); });
+  }catch(e){ $('freeProgress').style.display='none'; $('freeErr').textContent=String(e.message||'ошибка'); resetFreeBtn(); }
+}
+
+/* ---------- Шаг 4: пакеты ---------- */
+function fmt(p){ return String(p).replace(/\.00$/,''); }
+function buyPreview(){
+  $('freeErr').textContent='';
+  if(!selectedMannequin){ $('freeErr').textContent='Выберите модель.'; return; }
+  if(!items.length){ $('freeErr').textContent='Добавьте фото товара.'; return; }
+  selectedPackage='preview';
+  buyPackage();
+}
+
+function renderPackages(){
+  const grid=$('pkgGrid'); grid.innerHTML='';
+  (CONFIG.packages||[]).forEach(p=>{
+    if(p.id==='preview') return;
+    const d=document.createElement('div'); d.className='pkg'; d.dataset.id=p.id;
+    const best = p.id==='catalog' ? '<span class="best">выгодно</span>' : '';
+    const per = p.count>1 ? `≈ ${Math.round(Number(p.price)/p.count)} ₽ за фото` : 'разовая генерация';
+    const vid = (p.videos>0) ? ` · 🎬 ${p.videos} видео` : '';
+    d.innerHTML=`<div><div class="t">📦 ${p.title}${best}</div><div class="d">${per}${vid}</div></div>
+                 <div class="p">${fmt(p.price)} ₽</div>`;
+    d.onclick=()=>selectPackage(p.id);
+    grid.appendChild(d);
+  });
+}
+function selectPackage(id){
+  selectedPackage=id;
+  document.querySelectorAll('.pkg').forEach(x=>x.classList.toggle('sel',x.dataset.id===id));
+  const p=(CONFIG.packages||[]).find(x=>x.id===id);
+  $('buyBtn').disabled=false; $('buyBtn').textContent=`Купить пакет — ${fmt(p.price)} ₽`;
+}
+async function buyPackage(){
+  $('buyErr').textContent='';
+  if(!selectedPackage){ $('buyErr').textContent='Выберите пакет.'; return; }
+  const email=($('buyEmail').value||'').trim();
+  goal('buy_click');
+  // запоминаем уже загруженную вещь и модель, чтобы после оплаты не загружать заново
+  try{ sessionStorage.setItem('sg_pending', JSON.stringify({garments:garments(), mannequin:selectedMannequin})); }catch(e){}
+  if(CONFIG.paymentsEnabled){
+    $('buyBtn').disabled=true; $('buyBtn').textContent='Создаём платёж…';
+    try{
+      const r=await fetch('/api/create-payment',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({package:selectedPackage, email:email})});
+      if(!r.ok) throw new Error('create-payment');
+      const d=await r.json(); goal('payment_started'); location.href=d.confirmation_url;
+    }catch(e){ $('buyErr').textContent='Не удалось создать платёж.'; $('buyBtn').disabled=false; selectPackage(selectedPackage); }
+  } else {
+    try{
+      const r=await fetch('/api/test-order',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({package:selectedPackage, email:email})});
+      const d=await r.json(); afterPayment(d.order_id);
+    }catch(e){ $('buyErr').textContent='Тестовый режим недоступен.'; }
+  }
+}
+
+/* ---------- После оплаты / вход по коду ---------- */
+async function afterPayment(orderId){
+  // ждём подтверждения и получаем код
+  for(let i=0;i<15;i++){
+    try{ const r=await fetch('/api/order/'+encodeURIComponent(orderId),{cache:'no-store'});
+      if(r.ok){ const d=await r.json(); if(d.paid && d.code){ goal('purchase'); enterWorkMode(d.code, true); return; } }
+    }catch(e){}
+    await new Promise(res=>setTimeout(res,2000));
+  }
+  alert('Оплата ещё подтверждается. Обновите страницу через минуту — код появится.');
+}
+
+async function applyCode(){
+  $('codeErr').textContent='';
+  const code=($('codeInput').value||'').trim().toUpperCase();
+  if(!code){ return; }
+  try{
+    const r=await fetch('/api/code/'+encodeURIComponent(code)); const d=await r.json();
+    if(!d.valid){ $('codeErr').textContent='Код не найден.'; return; }
+    enterWorkMode(code, false, d);
+  }catch(e){ $('codeErr').textContent='Ошибка проверки кода.'; }
+}
+
+async function enterWorkMode(code, showCode, info){
+  currentCode=code;
+  if(!info){ try{ info=await (await fetch('/api/code/'+encodeURIComponent(code))).json(); }catch(e){ info={creditsLeft:0,videoLeft:0}; } }
+  creditsLeft=info.creditsLeft||0; videoLeft=info.videoLeft||0; hasVideo=videoLeft>0;
+  // прячем шаги покупки, показываем рабочую зону
+  ['card1','card2','card3'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+  $('workArea').style.display='block';
+  if(showCode){ $('codeBox').style.display='block'; $('codeValue').textContent=code; $('codeVideoWrap').style.display = videoLeft>0 ? 'inline':'none'; }
+  updateBalance();
+  // переносим ранее загруженную вещь и модель в рабочую зону (в т.ч. после возврата с оплаты)
+  if(!items.length){
+    try{
+      const p=JSON.parse(sessionStorage.getItem('sg_pending')||'null');
+      if(p){
+        if(Array.isArray(p.garments)) items=p.garments.map(u=>({id:idc++, dataUrl:u}));
+        if(p.mannequin && !selectedMannequin) selectedMannequin=p.mannequin;
+      }
+    }catch(e){}
+  }
+  try{ sessionStorage.removeItem('sg_pending'); }catch(e){}
+  renderThumbs();
+  if(selectedMannequin) selectMannequin(selectedMannequin);   // подсветить выбранную модель в рабочей зоне
+  $('workArea').scrollIntoView({behavior:'smooth',block:'start'});
+}
+
+function updateBalance(){
+  $('balancePill').textContent = creditsLeft+' фото';
+  $('codeCredits').textContent = creditsLeft;
+  $('codeVideos').textContent = videoLeft;
+  $('codeVideoWrap').style.display = videoLeft>0 ? 'inline':'none';
+  const pv=$('balancePillVideo'); pv.textContent = videoLeft+' видео'; pv.style.display = videoLeft>0 ? 'inline-block':'none';
+  $('genBtn').disabled = creditsLeft<=0;
+  $('genVideoBtn').style.display = videoLeft>0 ? 'block':'none';
+  $('genVideoBtn').disabled = videoLeft<=0;
+  if(creditsLeft<=0 && videoLeft<=0){ $('genErr').textContent='Генерации закончились. Нажмите «Купить ещё пакет» ниже.'; }
+}
+
+function buyMore(){
+  const c=$('card4'); if(c){ c.style.display=''; c.scrollIntoView({behavior:'smooth',block:'start'}); }
+}
+
+/* ---------- Генерация в HD (списание) ---------- */
+async function generate(kind){
+  $('genErr').textContent='';
+  if(!currentCode){ $('genErr').textContent='Нет кода доступа.'; return; }
+  if(!selectedMannequin){ $('genErr').textContent='Выберите модель.'; return; }
+  if(!items.length){ $('genErr').textContent='Добавьте фото товара.'; return; }
+  if(kind==='video' && videoLeft<=0){ $('genErr').textContent='Видео в вашем пакете закончились.'; return; }
+  if(kind==='photo' && creditsLeft<=0){ $('genErr').textContent='Фото-генерации закончились.'; return; }
+  $('genBtn').disabled=true; $('genVideoBtn').disabled=true;
+  $('genProgress').style.display='block'; $('genResult').style.display='none';
+  $('genProgressText').textContent = kind==='video' ? 'Готовим видео… 2–4 минуты.' : 'Готовим фото в HD… до минуты.';
+  try{
+    const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code:currentCode,mannequin:selectedMannequin,kind:kind,garments:garments()})});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error(e.detail||'ошибка'); }
+    const d=await r.json();
+    if(typeof d.photoLeft==='number') creditsLeft=d.photoLeft;
+    if(typeof d.videoLeft==='number') videoLeft=d.videoLeft;
+    updateBalance();
+    pollTask(d.task_id, kind==='video'?100:40, (res)=>{
+      $('genProgress').style.display='none'; $('genResult').style.display='block';
+      const vid=$('genVideo'), im=$('genImg');
+      if((res.kind||kind)==='video'){ im.style.display='none'; vid.style.display='block'; vid.src=res.url; $('genDl').setAttribute('download','styleglobe.mp4'); }
+      else { vid.style.display='none'; im.style.display='block'; im.src=res.url; $('genDl').setAttribute('download','styleglobe-hd.jpg'); }
+      $('genDl').href=res.url;
+      updateBalance();
+      $('genResult').scrollIntoView({behavior:'smooth',block:'start'});
+    },(err)=>{ $('genProgress').style.display='none'; $('genErr').textContent='Не удалось: '+err; updateBalance(); });
+  }catch(e){ $('genProgress').style.display='none'; $('genErr').textContent=String(e.message||'ошибка'); updateBalance(); }
+}
+
+/* ---------- Мои образы (история по коду) ---------- */
+async function loadMine(){
+  if(!currentCode) return;
+  $('myBtn').disabled=true; $('myBtn').textContent='Загружаем…';
+  try{
+    const d=await (await fetch('/api/mine/'+encodeURIComponent(currentCode))).json();
+    const items=d.items||[];
+    if(!items.length){ $('myGrid').innerHTML='<div class="sub">Пока нет созданных образов.</div>'; }
+    else{
+      $('myGrid').innerHTML = items.map(it=>{
+        const url='/api/myfile/'+encodeURIComponent(currentCode)+'/'+it.id;
+        const media = it.kind==='video'
+          ? `<video src="${url}" muted playsinline preload="metadata" onclick="openLB('video','${url}')"></video>`
+          : `<img src="${url}" alt="образ" onclick="openLB('img','${url}')">`;
+        return `<div class="my-item">${media}<a href="${url}" download="styleglobe-${it.kind}">⬇ Скачать</a></div>`;
+      }).join('');
+    }
+  }catch(e){ $('myGrid').innerHTML='<div class="err">Не удалось загрузить.</div>'; }
+  $('myBtn').disabled=false; $('myBtn').textContent='Обновить';
+}
+
+/* ---------- Вопросы и ответы (из базы) ---------- */
+function escapeHtml(s){ return String(s||'').replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function renderFaq(){
+  try{
+    const d=await (await fetch('/api/faq')).json();
+    const items=d.items||[];
+    if(!items.length) return;
+    $('faqList').innerHTML = items.map(it=>
+      `<details class="faq"><summary>${escapeHtml(it.question)}</summary><p>${escapeHtml(it.answer)}</p></details>`).join('');
+    $('faqCard').style.display='block';
+  }catch(e){}
+}
+
+/* ---------- Предложения и замечания ---------- */
+async function sendSuggestion(){
+  $('sgErr').textContent='';
+  const msg=($('sgMsg').value||'').trim();
+  if(msg.length<2){ $('sgErr').textContent='Напишите сообщение.'; return; }
+  const contact=($('sgContact').value||'').trim();
+  try{
+    const r=await fetch('/api/suggestion',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message:msg, contact:contact, visitorId:visitorId()})});
+    if(!r.ok) throw new Error();
+    $('sgMsg').value=''; $('sgContact').value='';
+    $('sgThanks').style.display='block';
+    goal('suggestion_sent');
+  }catch(e){ $('sgErr').textContent='Не удалось отправить. Попробуйте позже.'; }
+}
+
+/* ---------- Галерея примеров (образы: вещи → видео на модели) ---------- */
+const LOOKS = [
+  {items:['/assets/before1.jpg','/assets/before2.jpg','/assets/before3.jpg','/assets/before4.jpg','/assets/before5.jpg'], video:'/assets/after.mp4', poster:'/assets/poster.jpg'},
+  {items:['/assets/look1_b1.jpg','/assets/look1_b2.jpg','/assets/look1_b3.jpg','/assets/look1_b4.jpg','/assets/look1_b5.jpg'], video:'/assets/look1_after.mp4', poster:'/assets/look1_poster.jpg'},
+  {items:['/assets/look2_b1.jpg','/assets/look2_b2.jpg','/assets/look2_b3.jpg','/assets/look2_b4.jpg','/assets/look2_b5.jpg'], video:'/assets/look2_after.mp4', poster:'/assets/look2_poster.jpg'}
+];
+const OUTFITS = [
+  {before:'/assets/before10.jpg', video:'/assets/after10.mp4', poster:'/assets/after10_poster.jpg'},
+  {before:'/assets/before11.jpg', video:'/assets/after11.mp4', poster:'/assets/after11_poster.jpg'},
+  {before:'/assets/before12.jpg', video:'/assets/after12.mp4', poster:'/assets/after12_poster.jpg'}
+];
+function scrollAutfit(){
+  const g=$('autfitGallery'); if(!g) return;
+  const looks=g.querySelectorAll('.look'); if(!looks.length) return;
+  const cur=Math.round(g.scrollLeft/g.clientWidth);
+  const next=(cur+1)%looks.length;
+  g.scrollTo({left: looks[next].offsetLeft, behavior:'smooth'});
+}
+function renderOutfits(){
+  const g=$('autfitGallery'); if(!g) return;
+  g.innerHTML = OUTFITS.map((L,i)=>`<div class="look">
+      <div class="look-label">Комплект до примерки на модели</div>
+      <img src="${L.before}" alt="комплект" style="width:100%;max-width:200px;border-radius:10px;display:block;margin:0 auto;cursor:zoom-in;" onclick="openLB('img','${L.before}')">
+      <div class="look-arrow">↓${ i<OUTFITS.length-1 ? '<span class="swipe-hint" onclick="event.stopPropagation(); scrollAutfit()">ещё →</span>' : '' }</div>
+      <div class="look-label" style="margin:8px 0 5px;">ГОТОВОЕ ВИДЕО НА МОДЕЛИ</div>
+      <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
+    </div>`).join('');
+  const dots=$('autfitDots');
+  if(dots){ dots.innerHTML = OUTFITS.map((_,i)=>`<span class="${i===0?'on':''}"></span>`).join(''); }
+  const vids=g.querySelectorAll('video');
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver((ents)=>{ ents.forEach(e=>{ const v=e.target;
+      if(e.isIntersecting && e.intersectionRatio>0.6){ try{v.play();}catch(_){} } else { try{v.pause();}catch(_){} } }); },{threshold:[0,0.6,1]});
+    vids.forEach(v=>io.observe(v));
+  }
+}
+function scrollGallery(){
+  const g=$('gallery'); if(!g) return;
+  const looks=g.querySelectorAll('.look'); if(!looks.length) return;
+  const cur=Math.round(g.scrollLeft/g.clientWidth);
+  const next=(cur+1)%looks.length;
+  g.scrollTo({left: looks[next].offsetLeft, behavior:'smooth'});
+}
+function renderGallery(){
+  const g=$('gallery'); if(!g) return;
+  g.innerHTML = LOOKS.map((L,i)=>{
+    const thumbs = L.items.map((src,j)=>{
+      const oe = (i===0&&j===0) ? ` onerror="var d=document.getElementById('heroDemo'); if(d) d.style.display='none';"` : '';
+      return `<img src="${src}" alt="вещь" onclick="openLB('img','${src}')"${oe}>`;
+    }).join('');
+    return `<div class="look">
+      <div class="look-label">ВЕЩИ ДО ПРИМЕРКИ НА МОДЕЛИ</div>
+      <div class="look-items">${thumbs}</div>
+      <div class="look-arrow">↓${ i<LOOKS.length-1 ? '<span class="swipe-hint" onclick="event.stopPropagation(); scrollGallery()">ещё образы →</span>' : '' }</div>
+      <div class="look-label" style="margin:8px 0 5px;">ГОТОВОЕ ВИДЕО НА МОДЕЛИ</div>
+      <video src="${L.video}" poster="${L.poster}" muted loop playsinline preload="metadata" onclick="openLB('video','${L.video}')"></video>
+    </div>`;
+  }).join('');
+  const dots=$('galleryDots');
+  if(dots){ dots.innerHTML = LOOKS.map((_,i)=>`<span class="${i===0?'on':''}"></span>`).join(''); }
+  const vids = g.querySelectorAll('video');
+  if('IntersectionObserver' in window){
+    const io=new IntersectionObserver((ents)=>{
+      ents.forEach(e=>{ const v=e.target;
+        if(e.isIntersecting && e.intersectionRatio>0.6){ try{v.play();}catch(_){} }
+        else { try{v.pause();}catch(_){} }
+      });
+    },{threshold:[0,0.6,1]});
+    vids.forEach(v=>io.observe(v));
+  } else if(vids[0]){ try{vids[0].play();}catch(_){} }
+  g.addEventListener('scroll', ()=>{
+    const idx = Math.round(g.scrollLeft / g.clientWidth);
+    if(dots) dots.querySelectorAll('span').forEach((s,i)=>s.classList.toggle('on', i===idx));
+  });
+}
+
+/* ---------- Лайтбокс: увеличение фото/видео на весь экран ---------- */
+function openLB(kind, src){
+  const lb=$('lightbox'), im=$('lbImg'), vd=$('lbVideo');
+  if(kind==='video'){
+    im.style.display='none';
+    vd.src=src; vd.style.display='block'; vd.muted=false;
+    try{ vd.currentTime=0; vd.play(); }catch(e){}
+  } else {
+    vd.pause(); vd.style.display='none';
+    im.src=src; im.style.display='block';
+  }
+  lb.classList.add('open');
+}
+function closeLB(){
+  const lb=$('lightbox'), vd=$('lbVideo');
+  lb.classList.remove('open');
+  try{ vd.pause(); }catch(e){}
+}
+
+/* ---------- Мини-опрос: что останавливает от покупки ---------- */
+function sendFeedback(reason){
+  if(reason==='другое'){ $('surveyOpts').style.display='none'; $('surveyComment').style.display='block'; return; }
+  postFeedback(reason, '');
+}
+function sendFeedbackComment(){
+  const c=($('surveyCommentInput').value||'').trim();
+  postFeedback('другое', c);
+}
+async function postFeedback(reason, comment){
+  try{
+    await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({reason:reason, comment:comment, visitorId:visitorId()})});
+  }catch(e){}
+  goal('feedback_sent');
+  $('surveyOpts').style.display='none';
+  $('surveyComment').style.display='none';
+  $('surveyThanks').style.display='block';
+}
+
+renderGallery();   // построить галерею примеров (независимо от конфигурации)
+renderOutfits();   // блок АУТФИТ
+renderFaq();       // загрузить вопросы и ответы из базы
+</script>
+</body>
+</html>
