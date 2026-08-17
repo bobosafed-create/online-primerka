@@ -254,6 +254,7 @@
       <button class="btn" id="genBtn" onclick="generate('photo')" style="margin-top:14px;">📸 Создать фото в HD (−1 фото)</button>
       <button class="btn" id="genVideoBtn" onclick="generate('video')" style="margin-top:10px;display:none;background:#8a5cf6;box-shadow:none;">🎬 Создать видео (−1 видео)</button>
       <div class="err" id="genErr"></div>
+      <button class="btn" id="buyMoreBtn" onclick="buyMore()" style="margin-top:12px;background:var(--green);box-shadow:none;">🛒 Купить ещё пакет</button>
       <div class="progress" id="genProgress" style="display:none;"><div class="spinner"></div><div id="genProgressText">Готовим…</div></div>
       <div class="result" id="genResult" style="display:none;">
         <video id="genVideo" controls autoplay loop muted playsinline style="display:none;"></video>
@@ -562,7 +563,11 @@ function updateBalance(){
   $('genBtn').disabled = creditsLeft<=0;
   $('genVideoBtn').style.display = videoLeft>0 ? 'block':'none';
   $('genVideoBtn').disabled = videoLeft<=0;
-  if(creditsLeft<=0 && videoLeft<=0){ $('genErr').textContent='Генерации закончились. Купите новый пакет (обновите страницу).'; }
+  if(creditsLeft<=0 && videoLeft<=0){ $('genErr').textContent='Генерации закончились. Нажмите «Купить ещё пакет» ниже.'; }
+}
+
+function buyMore(){
+  const c=$('card4'); if(c){ c.style.display=''; c.scrollIntoView({behavior:'smooth',block:'start'}); }
 }
 
 /* ---------- Генерация в HD (списание) ---------- */
