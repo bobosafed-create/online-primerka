@@ -534,7 +534,7 @@ async function enterWorkMode(code, showCode, info){
   if(!info){ try{ info=await (await fetch('/api/code/'+encodeURIComponent(code))).json(); }catch(e){ info={creditsLeft:0,videoLeft:0}; } }
   creditsLeft=info.creditsLeft||0; videoLeft=info.videoLeft||0; hasVideo=videoLeft>0;
   // прячем шаги покупки, показываем рабочую зону
-  ['card1','card2','card3','card4'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
+  ['card1','card2','card3'].forEach(id=>{ const el=$(id); if(el) el.style.display='none'; });
   $('workArea').style.display='block';
   if(showCode){ $('codeBox').style.display='block'; $('codeValue').textContent=code; $('codeVideoWrap').style.display = videoLeft>0 ? 'inline':'none'; }
   updateBalance();
