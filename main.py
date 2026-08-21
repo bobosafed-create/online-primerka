@@ -366,6 +366,16 @@ def p_proto(k: str = ""):
     return _page("proto.html")
 
 
+@app.get("/seller")
+def p_seller():
+    return _page("index.html")
+
+
+@app.get("/try-on")
+def p_tryon():
+    return _page("index.html")
+
+
 @app.get("/robots.txt")
 def robots_txt():
     body = (

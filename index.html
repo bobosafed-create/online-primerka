@@ -769,6 +769,25 @@ async function postFeedback(reason, comment){
 renderGallery();   // построить галерею примеров (независимо от конфигурации)
 renderOutfits();   // блок АУТФИТ
 renderFaq();       // загрузить вопросы и ответы из базы
+
+// --- Подмена текстов под аудиторию по адресу страницы ---
+// /try-on — язык для частных лиц; /seller и главная — язык для селлеров.
+(function applyAudienceCopy(){
+  try{
+    var path = location.pathname.replace(/\/+$/,'');
+    if(path !== '/try-on') return;   // остальные адреса — прежний (селлерский) текст
+    document.title = 'Примерка одежды на модели — StyleGlobe';
+    var hero = document.querySelector('.hero');
+    if(!hero) return;
+    var h1 = hero.querySelector('h1');
+    if(h1) h1.textContent = 'Примерьте одежду на модели — ещё до покупки';
+    var eco = hero.querySelector('.eco');
+    if(eco) eco.innerHTML = 'Быстро и удобно<span class="eco-sub"> — без примерочной и фотостудии</span>';
+    var ps = hero.querySelectorAll('p');
+    if(ps[0]) ps[0].textContent = 'Загрузите фото вещи — увидите, как она смотрится на живой модели.';
+    if(ps[1]) ps[1].textContent = 'Соберите образ из нескольких вещей — оцените, как всё сочетается.';
+  }catch(e){}
+})();
 </script>
 </body>
 </html>
