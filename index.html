@@ -492,7 +492,7 @@ async function buyPackage(){
     $('buyBtn').disabled=true; $('buyBtn').textContent='Создаём платёж…';
     try{
       const r=await fetch('/api/create-payment',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({package:selectedPackage, email:email})});
+        body:JSON.stringify({package:selectedPackage, email:email, return_path:location.pathname})});
       if(!r.ok) throw new Error('create-payment');
       const d=await r.json(); goal('payment_started'); location.href=d.confirmation_url;
     }catch(e){ $('buyErr').textContent='Не удалось создать платёж.'; $('buyBtn').disabled=false; selectPackage(selectedPackage); }

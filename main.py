@@ -942,6 +942,11 @@ def send_code_email(to, code, pkg_title):
 class CreatePaymentIn(BaseModel):
     package: str
     email: Optional[str] = ""
+    return_path: Optional[str] = "/"
+
+
+# Разрешённые страницы возврата после оплаты (чтобы вернуть покупателя туда, откуда он пришёл)
+ALLOWED_RETURN_PATHS = {"/", "/seller", "/try-on"}
 
 
 @app.post("/api/create-payment")
@@ -951,13 +956,17 @@ def create_payment(data: CreatePaymentIn):
     pkg = PACKAGE_BY_ID.get(data.package)
     if not pkg:
         raise HTTPException(400, "Неизвестный пакет")
+    rpath = (data.return_path or "/").rstrip("/") or "/"
+    if rpath not in ALLOWED_RETURN_PATHS:
+        rpath = "/"
     order_id = uuid.uuid4().hex
+    return_url = f"{SITE_URL}{rpath}?order_id={order_id}"
     dbrun("INSERT INTO orders(order_id,package,amount,paid,is_test,email,created_at) VALUES(?,?,?,0,0,?,?)",
           (order_id, pkg["id"], pkg["price"], (data.email or "").strip()[:160], now_iso()))
     payment = Payment.create({
         "amount": {"value": pkg["price"], "currency": CURRENCY},
         "capture": True,
-        "confirmation": {"type": "redirect", "return_url": f"{SITE_URL}/?order_id={order_id}"},
+        "confirmation": {"type": "redirect", "return_url": return_url},
         "description": f"StyleGlobe — пакет «{pkg['title']}» ({pkg['count']} генераций)",
         "metadata": {"order_id": order_id},
     }, uuid.uuid4().hex)
