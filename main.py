@@ -421,7 +421,7 @@ def sitemap_xml():
     return Response(content=body, media_type="application/xml")
 
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 @app.get("/api/health")
 def health():
     return {"status": "ok", "db": "postgres" if USE_PG else "sqlite"}
