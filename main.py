@@ -48,6 +48,17 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "").strip()
 ADMIN_TOKEN = uuid.uuid4().hex
 METRIKA_ID = os.getenv("METRIKA_ID", "").strip()   # номер счётчика Яндекс.Метрики
 
+SELLER_PAGE_TITLE = "StyleGlobe — каталожные фото для Wildberries и Ozon"
+SELLER_PAGE_DESCRIPTION = (
+    "Создавайте каталожные фото одежды на моделях для Wildberries и Ozon "
+    "без фотостудии."
+)
+TRYON_PAGE_TITLE = "Примерьте одежду на ИИ-модели ещё до покупки — StyleGlobe"
+TRYON_PAGE_DESCRIPTION = (
+    "Загрузите фото вещи и посмотрите, как она выглядит на ИИ-модели, "
+    "прежде чем покупать."
+)
+
 # Почта для отправки кода доступа (SMTP). Если не задано — код только на экране.
 SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or "587")
@@ -320,7 +331,7 @@ app.add_middleware(CORSMiddleware, allow_origins=[SITE_URL, "*"],
                    allow_methods=["*"], allow_headers=["*"])
 
 
-def _page(name):
+def _page(name, *, title=None, description=None, canonical=None):
     p = os.path.join(HERE, name)
     if not os.path.exists(p):
         return JSONResponse({"detail": f"{name} не найден"}, status_code=404)
@@ -328,6 +339,9 @@ def _page(name):
         try:
             html = open(p, encoding="utf-8").read()
             html = html.replace("__METRIKA_ID__", METRIKA_ID or "0")
+            html = html.replace("__PAGE_TITLE__", title or SELLER_PAGE_TITLE)
+            html = html.replace("__PAGE_DESCRIPTION__", description or SELLER_PAGE_DESCRIPTION)
+            html = html.replace("__PAGE_CANONICAL__", canonical or SITE_URL)
             return Response(content=html, media_type="text/html")
         except Exception:
             return FileResponse(p)
@@ -336,7 +350,7 @@ def _page(name):
 
 @app.get("/")
 def index():
-    return _page("index.html")
+    return _page("index.html", canonical=SITE_URL)
 
 
 @app.get("/oferta")
@@ -368,12 +382,17 @@ def p_proto(k: str = ""):
 
 @app.get("/seller")
 def p_seller():
-    return _page("index.html")
+    return _page("index.html", canonical=f"{SITE_URL}/seller")
 
 
 @app.get("/try-on")
 def p_tryon():
-    return _page("index.html")
+    return _page(
+        "index.html",
+        title=TRYON_PAGE_TITLE,
+        description=TRYON_PAGE_DESCRIPTION,
+        canonical=f"{SITE_URL}/try-on",
+    )
 
 
 @app.get("/robots.txt")
