@@ -12,7 +12,8 @@ WORKDIR /app
 # pure-Python source package, so it can still install without a C compiler.
 # Avoid apt-get so a Debian mirror DNS outage cannot block the application build.
 COPY requirements.lock ./
-RUN python -m pip install --no-cache-dir --prefer-binary -r requirements.lock
+COPY vendor ./vendor
+RUN python -m pip install --no-cache-dir --no-index --find-links=/app/vendor -r requirements.lock
 
 COPY . ./
 
